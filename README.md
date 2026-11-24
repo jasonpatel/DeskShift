@@ -22,10 +22,9 @@ Switching between them manually is painful:
 - **Desk Profile:** Restores dual desk monitors, sets desk speakers, enables tablet/productivity USBs, and cuts power to the sim rig via smart plug.
 - **Sim Rig Profile:** Powers up rig screens via smart plug, enables direct-drive wheel/pedal USB devices in Device Manager, applies the triple-screen topology with exact refresh rates, and routes audio to the rig headset.
 
-<p align="center">
-  <img src="docs/screenshots/tray_menu.png" alt="DeskShift System Tray Menu" width="320" style="vertical-align: top; margin-right: 20px;" />
-  <img src="docs/screenshots/mobile_remote.png" alt="DeskShift Mobile Web Remote" width="300" style="vertical-align: top;" />
-</p>
+| System Tray Profile Switcher | Mobile Web Remote & iOS Touch Dashboard |
+| :---: | :---: |
+| ![System Tray Menu](docs/screenshots/tray_menu.png) | ![Mobile Remote](docs/screenshots/mobile_remote.png) |
 
 ---
 
