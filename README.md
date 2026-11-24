@@ -24,7 +24,7 @@ Switching between them manually is painful:
 
 | Windows System Tray Menu | Mobile Touch & Power Dashboard |
 | :---: | :---: |
-| <img src="docs/screenshots/tray_menu.png" alt="DeskShift System Tray Menu" width="340" /> | <img src="docs/screenshots/mobile_remote.png" alt="DeskShift Mobile Touch Dashboard" width="220" /> |
+| <a href="docs/screenshots/tray_menu.png"><img src="docs/screenshots/tray_menu.png" alt="DeskShift System Tray Menu" height="350" /></a> | <a href="docs/screenshots/mobile_remote.png"><img src="docs/screenshots/mobile_remote.png" alt="DeskShift Mobile Touch Dashboard" height="350" /></a> |
 
 ---
 
