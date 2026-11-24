@@ -22,6 +22,25 @@ Switching between them manually is painful:
 - **Desk Profile:** Restores dual desk monitors, sets desk speakers, enables tablet/productivity USBs, and cuts power to the sim rig via smart plug.
 - **Sim Rig Profile:** Powers up rig screens via smart plug, enables direct-drive wheel/pedal USB devices in Device Manager, applies the triple-screen topology with exact refresh rates, and routes audio to the rig headset.
 
+<p align="center">
+  <img src="docs/screenshots/tray_menu.png" alt="DeskShift System Tray Menu" width="320" style="vertical-align: top; margin-right: 20px;" />
+  <img src="docs/screenshots/mobile_remote.png" alt="DeskShift Mobile Web Remote" width="300" style="vertical-align: top;" />
+</p>
+
+---
+
+## Configuration Interface
+
+DeskShift provides a native Win32 GUI configurator (`Configure-DeskShift.ps1`) to capture display topologies, assign audio playback devices, manage smart plug relays, and map USB peripherals:
+
+| Profile Assignment Matrix | Smart Plug Configuration |
+| :---: | :---: |
+| ![Profile Matrix](docs/screenshots/config_matrix.png) | ![Smart Plugs](docs/screenshots/config_smart_plugs.png) |
+
+| Managed USB Hardware | Mobile Web & iOS Shortcuts |
+| :---: | :---: |
+| ![Managed USB Devices](docs/screenshots/config_usb_devices.png) | ![Mobile Web Remote](docs/screenshots/config_web_portal.png) |
+
 ---
 
 ## Features
