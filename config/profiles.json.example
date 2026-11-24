@@ -1,0 +1,74 @@
+{
+    "IconFile": "monitor_exact_taskbar.ico",
+    "Profiles": [
+        {
+            "Name": "Desk (Dual Monitors)",
+            "Label": "Desk (Dual Monitors)",
+            "Devices": {},
+            "Plugs": {},
+            "WebVisible": true,
+            "WebIcon": "🖥️",
+            "WebColor": "#3b82f6"
+        },
+        {
+            "Name": "Desk (Single Screen)",
+            "Label": "Desk (Single - Toggle L/R)",
+            "IsToggle": true,
+            "Devices": {},
+            "Plugs": {},
+            "ToggleCycle": [
+                "Desk (Single Right)",
+                "Desk (Single Left)"
+            ],
+            "WebVisible": true,
+            "WebIcon": "🔄",
+            "WebColor": "#ef4444"
+        },
+        {
+            "Name": "Desk (Single Right)",
+            "Label": "Desk (Single Right)",
+            "Hidden": true,
+            "Devices": {},
+            "Plugs": {},
+            "WebVisible": false,
+            "WebIcon": "🖥️",
+            "WebColor": "#ef4444"
+        },
+        {
+            "Name": "Desk (Single Left)",
+            "Label": "Desk (Single Left)",
+            "Hidden": true,
+            "Devices": {},
+            "Plugs": {},
+            "WebVisible": false,
+            "WebIcon": "🖥️",
+            "WebColor": "#ef4444"
+        },
+        {
+            "Name": "Gaming / TV",
+            "Label": "Gaming / TV",
+            "Devices": {},
+            "Plugs": {},
+            "AudioDevice": "",
+            "WebVisible": true,
+            "WebIcon": "📺",
+            "WebColor": "#10b981"
+        }
+    ],
+    "AutoStart": false,
+    "WebRemote": {
+        "Enabled": true,
+        "Port": 8443,
+        "AutoStart": false,
+        "RequireAuth": false,
+        "PinCode": "1234"
+    },
+    "UsbDevices": {},
+    "SmartPlugs": {
+        "Config": {},
+        "TapoAuth": {
+            "Email": "user@example.com",
+            "Password": "password_here"
+        }
+    }
+}

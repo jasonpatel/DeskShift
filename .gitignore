@@ -1,0 +1,19 @@
+# Environment & Secrets
+key.pem
+cert.pem
+node_modules/
+web-remote/node_modules/
+
+# Runtime Logs
+*.log
+web-remote/*.log
+
+# User Configuration and Captured Topologies
+config/profiles.json
+config/*.native.json
+config/.last_*
+
+# Windows Thumbnail & System caches
+Thumbs.db
+Desktop.ini
+.DS_Store
