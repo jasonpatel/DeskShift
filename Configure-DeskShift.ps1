@@ -2604,6 +2604,24 @@ $saveBtn.add_Click({
         Remove-ItemProperty -Path $regRunPath -Name $regRunName -ErrorAction SilentlyContinue
     }
 
+    # Manage Web Remote background process state
+    $appRoot = Split-Path $ConfigFile
+    $webRemoteVbs = Join-Path $appRoot "web-remote\Run-Silent.vbs"
+    if ($chkEnableWebRemote.Checked) {
+        $nodeListening = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in @([int]$numWebPort.Value, 443) }
+        if (-not $nodeListening) {
+            if (Test-Path -LiteralPath $webRemoteVbs) {
+                Start-Process "wscript.exe" -ArgumentList "`"$webRemoteVbs`"" -WorkingDirectory (Split-Path $webRemoteVbs) -WindowStyle Hidden
+            }
+        }
+    } else {
+        # If disabled by user, stop any running background web-remote instance
+        Get-Process node -ErrorAction SilentlyContinue | Where-Object {
+            $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId = $($_.Id)" -ErrorAction SilentlyContinue).CommandLine
+            $cmd -like "*DeskShift*server.js*"
+        } | Stop-Process -Force -ErrorAction SilentlyContinue
+    }
+
     Save-LiveConfig -cfg $liveCfg
     [System.Windows.Forms.MessageBox]::Show("Settings, Profile Matrix, and Hardware Config saved successfully!", "Saved", "OK", "Information")
 })
