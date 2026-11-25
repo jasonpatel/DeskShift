@@ -1629,6 +1629,8 @@ $btnNewProfile.add_Click({
         }
 
         & $refreshMatrixGrid
+        if ($refreshWebProfilesGrid) { & $refreshWebProfilesGrid }
+        if ($updateWebTabDisplay) { & $updateWebTabDisplay }
         # Select newly created profile in dropdown
         for ($i = 0; $i -lt $cmbProfiles.Items.Count; $i++) {
             if ($cmbProfiles.Items[$i].Name -eq $pName) {
@@ -1949,6 +1951,8 @@ $btnRenameProfile.add_Click({
 
         Save-LiveConfig -cfg $liveCfg
         & $refreshMatrixGrid
+        if ($refreshWebProfilesGrid) { & $refreshWebProfilesGrid }
+        if ($updateWebTabDisplay) { & $updateWebTabDisplay }
 
         # Reselect updated item
         for ($i = 0; $i -lt $cmbProfiles.Items.Count; $i++) {
@@ -2135,6 +2139,8 @@ $btnManageOrder.add_Click({
         $liveCfg.Profiles = @($workingList.ToArray())
         Save-LiveConfig -cfg $liveCfg
         & $refreshMatrixGrid
+        if ($refreshWebProfilesGrid) { & $refreshWebProfilesGrid }
+        if ($updateWebTabDisplay) { & $updateWebTabDisplay }
         [System.Windows.Forms.MessageBox]::Show("Menu order and divider lines updated successfully!", "Saved", "OK", "Information")
     }
 })
@@ -2267,6 +2273,8 @@ $btnDeleteProfile.add_Click({
         if (Test-Path -LiteralPath $nativeJson) { Remove-Item -LiteralPath $nativeJson -Force -ErrorAction SilentlyContinue }
 
         & $refreshMatrixGrid
+        if ($refreshWebProfilesGrid) { & $refreshWebProfilesGrid }
+        if ($updateWebTabDisplay) { & $updateWebTabDisplay }
         [System.Windows.Forms.MessageBox]::Show("Profile '$selName' deleted.", "Deleted", "OK", "Information")
     }
 })
@@ -2715,6 +2723,11 @@ $pnpStatusTimer.add_Tick({
 
 $form.add_Shown({
     $pnpStatusTimer.Start()
+
+    $tabWeb.add_Enter({
+        if ($refreshWebProfilesGrid) { & $refreshWebProfilesGrid }
+        if ($updateWebTabDisplay) { & $updateWebTabDisplay }
+    })
 
     $tabDevices.add_Enter({
         if ($addCombo.Items.Count -eq 0) {
