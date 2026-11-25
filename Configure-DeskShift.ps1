@@ -155,7 +155,7 @@ $configDir = Split-Path $ConfigFile
 # Main Form
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "DeskShift - Display Switcher, Hardware & Web Remote Manager"
-$form.Size = New-Object System.Drawing.Size(1040, 750)
+$form.Size = New-Object System.Drawing.Size(1120, 750)
 $form.StartPosition = "CenterScreen"
 $form.Font = New-Object System.Drawing.Font("Segoe UI", 9.5)
 $form.FormBorderStyle = "FixedDialog"
@@ -190,7 +190,7 @@ $form.Controls.Add($headerPanel)
 # Tab Control
 $tabs = New-Object System.Windows.Forms.TabControl
 $tabs.Location = New-Object System.Drawing.Point(20, 85)
-$tabs.Size = New-Object System.Drawing.Size(985, 560)
+$tabs.Size = New-Object System.Drawing.Size(1065, 560)
 
 # ==============================================================================
 # TAB 1: Profile Assignment Matrix (Devices & Plugs downwards as Rows, Profiles as Columns)
@@ -276,23 +276,31 @@ $btnAudioSelect = New-Object System.Windows.Forms.Button
 $btnAudioSelect.Text = "Audio Device"
 $btnAudioSelect.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.0, [System.Drawing.FontStyle]::Bold)
 $btnAudioSelect.Location = New-Object System.Drawing.Point(800, 9)
-$btnAudioSelect.Size = New-Object System.Drawing.Size(100, 30)
+$btnAudioSelect.Size = New-Object System.Drawing.Size(95, 30)
 $btnAudioSelect.BackColor = [System.Drawing.Color]::FromArgb(217, 119, 6)
 $btnAudioSelect.ForeColor = [System.Drawing.Color]::White
 $btnAudioSelect.FlatStyle = "Flat"
 $btnAudioSelect.FlatAppearance.BorderSize = 0
 $matrixTopBar.Controls.Add($btnAudioSelect)
 
+$btnAppSelect = New-Object System.Windows.Forms.Button
+$btnAppSelect.Text = "Launch App"
+$btnAppSelect.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.0, [System.Drawing.FontStyle]::Bold)
+$btnAppSelect.Location = New-Object System.Drawing.Point(900, 9)
+$btnAppSelect.Size = New-Object System.Drawing.Size(95, 30)
+$btnAppSelect.BackColor = [System.Drawing.Color]::FromArgb(13, 148, 136)
+$btnAppSelect.ForeColor = [System.Drawing.Color]::White
+$btnAppSelect.FlatStyle = "Flat"
+$btnAppSelect.FlatAppearance.BorderSize = 0
+$matrixTopBar.Controls.Add($btnAppSelect)
+
 $btnDeleteProfile = New-Object System.Windows.Forms.Button
 $btnDeleteProfile.Text = "Delete"
 $btnDeleteProfile.Font = New-Object System.Drawing.Font("Segoe UI", 9.0)
-$btnDeleteProfile.Location = New-Object System.Drawing.Point(908, 9)
+$btnDeleteProfile.Location = New-Object System.Drawing.Point(1000, 9)
 $btnDeleteProfile.Size = New-Object System.Drawing.Size(65, 30)
 $btnDeleteProfile.BackColor = [System.Drawing.Color]::FromArgb(239, 68, 68)
 $btnDeleteProfile.ForeColor = [System.Drawing.Color]::White
-$btnDeleteProfile.FlatStyle = "Flat"
-$btnDeleteProfile.FlatAppearance.BorderSize = 0
-$matrixTopBar.Controls.Add($btnDeleteProfile)
 $btnDeleteProfile.FlatStyle = "Flat"
 $btnDeleteProfile.FlatAppearance.BorderSize = 0
 $matrixTopBar.Controls.Add($btnDeleteProfile)
@@ -1612,11 +1620,13 @@ $btnNewProfile.add_Click({
         }
 
         $newProf = [PSCustomObject]@{
-            Name        = $pName
-            Label       = $pLbl
-            AudioDevice = $chosenAudio
-            Devices     = (New-Object PSObject)
-            Plugs       = (New-Object PSObject)
+            Name          = $pName
+            Label         = $pLbl
+            AudioDevice   = $chosenAudio
+            LaunchApp     = ""
+            LaunchAppArgs = ""
+            Devices       = (New-Object PSObject)
+            Plugs         = (New-Object PSObject)
         }
         $liveCfg.Profiles += $newProf
         Save-LiveConfig -cfg $liveCfg
@@ -2249,6 +2259,161 @@ $btnAudioSelect.add_Click({
         & $refreshMatrixGrid
         $msg = if ($assigned) { "Profile '$targetProfName' will now switch audio to:`n$assigned" } else { "Audio switching removed for '$targetProfName'." }
         [System.Windows.Forms.MessageBox]::Show($msg, "Audio Saved", "OK", "Information")
+    }
+})
+
+# Launch Application Assignment Handler
+$btnAppSelect.add_Click({
+    if (-not $cmbProfiles.SelectedItem) {
+        [System.Windows.Forms.MessageBox]::Show("Please select a target profile from the dropdown first.", "No Profile Selected", "OK", "Warning")
+        return
+    }
+
+    $selItem = $cmbProfiles.SelectedItem
+    $targetProfName = if ($selItem.Name) { $selItem.Name } else { $selItem.ToString() }
+    $liveCfg = Get-LiveConfig
+    $profObj = $liveCfg.Profiles | Where-Object { $_.Name -eq $targetProfName } | Select-Object -First 1
+    if (-not $profObj) { return }
+
+    $dlgApp = New-Object System.Windows.Forms.Form
+    $dlgApp.Text = "Launch Application On Switch - $targetProfName"
+    $dlgApp.Size = New-Object System.Drawing.Size(560, 360)
+    $dlgApp.StartPosition = "CenterParent"
+    $dlgApp.FormBorderStyle = "FixedDialog"
+    $dlgApp.MaximizeBox = $false
+    $dlgApp.MinimizeBox = $false
+
+    $lblAppDesc = New-Object System.Windows.Forms.Label
+    $lblAppDesc.Text = "Optionally launch a game client, dashboard, or script when switching to '$targetProfName' (e.g. Steam Big Picture mode, SimHub, or custom tool):"
+    $lblAppDesc.Location = New-Object System.Drawing.Point(20, 15)
+    $lblAppDesc.Size = New-Object System.Drawing.Size(505, 35)
+    $dlgApp.Controls.Add($lblAppDesc)
+
+    $lblAppPath = New-Object System.Windows.Forms.Label
+    $lblAppPath.Text = "Executable / Script Path:"
+    $lblAppPath.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.0, [System.Drawing.FontStyle]::Bold)
+    $lblAppPath.Location = New-Object System.Drawing.Point(20, 58)
+    $lblAppPath.Size = New-Object System.Drawing.Size(200, 20)
+    $dlgApp.Controls.Add($lblAppPath)
+
+    $txtAppPath = New-Object System.Windows.Forms.TextBox
+    $txtAppPath.Location = New-Object System.Drawing.Point(20, 80)
+    $txtAppPath.Size = New-Object System.Drawing.Size(415, 25)
+    $txtAppPath.Text = if ($profObj.LaunchApp) { $profObj.LaunchApp } else { "" }
+    $dlgApp.Controls.Add($txtAppPath)
+
+    $btnBrowseApp = New-Object System.Windows.Forms.Button
+    $btnBrowseApp.Text = "Browse..."
+    $btnBrowseApp.Location = New-Object System.Drawing.Point(445, 78)
+    $btnBrowseApp.Size = New-Object System.Drawing.Size(80, 29)
+    $dlgApp.Controls.Add($btnBrowseApp)
+
+    $btnBrowseApp.add_Click({
+        $openDlg = New-Object System.Windows.Forms.OpenFileDialog
+        $openDlg.Title = "Select Application or Script to Launch"
+        $openDlg.Filter = "Programs & Scripts (*.exe;*.bat;*.cmd;*.ps1;*.vbs;*.lnk)|*.exe;*.bat;*.cmd;*.ps1;*.vbs;*.lnk|All Files (*.*)|*.*"
+        if ($openDlg.ShowDialog($dlgApp) -eq [System.Windows.Forms.DialogResult]::OK) {
+            $txtAppPath.Text = $openDlg.FileName
+        }
+    })
+
+    $lblAppArgs = New-Object System.Windows.Forms.Label
+    $lblAppArgs.Text = "Arguments (Optional):"
+    $lblAppArgs.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.0, [System.Drawing.FontStyle]::Bold)
+    $lblAppArgs.Location = New-Object System.Drawing.Point(20, 115)
+    $lblAppArgs.Size = New-Object System.Drawing.Size(200, 20)
+    $dlgApp.Controls.Add($lblAppArgs)
+
+    $txtAppArgs = New-Object System.Windows.Forms.TextBox
+    $txtAppArgs.Location = New-Object System.Drawing.Point(20, 137)
+    $txtAppArgs.Size = New-Object System.Drawing.Size(505, 25)
+    $txtAppArgs.Text = if ($profObj.LaunchAppArgs) { $profObj.LaunchAppArgs } else { "" }
+    $dlgApp.Controls.Add($txtAppArgs)
+
+    # Preset Quick-Buttons (Steam Big Picture, etc.)
+    $lblPresets = New-Object System.Windows.Forms.Label
+    $lblPresets.Text = "Quick Presets:"
+    $lblPresets.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8.5, [System.Drawing.FontStyle]::Bold)
+    $lblPresets.Location = New-Object System.Drawing.Point(20, 175)
+    $lblPresets.Size = New-Object System.Drawing.Size(100, 20)
+    $dlgApp.Controls.Add($lblPresets)
+
+    $steamExe = (Get-ItemProperty "HKCU:\Software\Valve\Steam" -ErrorAction SilentlyContinue).SteamExe
+    if (-not $steamExe -or -not (Test-Path -LiteralPath $steamExe)) {
+        if (Test-Path "C:\Program Files (x86)\Steam\steam.exe") { $steamExe = "C:\Program Files (x86)\Steam\steam.exe" }
+        elseif (Test-Path "D:\games\steam\steam.exe") { $steamExe = "D:\games\steam\steam.exe" }
+    }
+
+    $btnSteamBP = New-Object System.Windows.Forms.Button
+    $btnSteamBP.Text = "🎮 Steam Big Picture"
+    $btnSteamBP.Location = New-Object System.Drawing.Point(20, 198)
+    $btnSteamBP.Size = New-Object System.Drawing.Size(155, 30)
+    $btnSteamBP.BackColor = [System.Drawing.Color]::FromArgb(241, 245, 249)
+    $btnSteamBP.FlatStyle = "Flat"
+    $dlgApp.Controls.Add($btnSteamBP)
+
+    $btnSteamBP.add_Click({
+        if ($steamExe) {
+            $txtAppPath.Text = $steamExe
+            $txtAppArgs.Text = "-bigpicture"
+        } else {
+            [System.Windows.Forms.MessageBox]::Show("Steam installation not automatically found in registry. Please browse to steam.exe manually.", "Steam Not Found", "OK", "Information")
+        }
+    })
+
+    $btnClearApp = New-Object System.Windows.Forms.Button
+    $btnClearApp.Text = "❌ Clear (No App)"
+    $btnClearApp.Location = New-Object System.Drawing.Point(185, 198)
+    $btnClearApp.Size = New-Object System.Drawing.Size(130, 30)
+    $btnClearApp.BackColor = [System.Drawing.Color]::FromArgb(241, 245, 249)
+    $btnClearApp.FlatStyle = "Flat"
+    $dlgApp.Controls.Add($btnClearApp)
+
+    $btnClearApp.add_Click({
+        $txtAppPath.Text = ""
+        $txtAppArgs.Text = ""
+    })
+
+    # Save and Cancel
+    $btnSaveApp = New-Object System.Windows.Forms.Button
+    $btnSaveApp.Text = "Save App Setting"
+    $btnSaveApp.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $btnSaveApp.Location = New-Object System.Drawing.Point(270, 260)
+    $btnSaveApp.Size = New-Object System.Drawing.Size(140, 34)
+    $btnSaveApp.BackColor = [System.Drawing.Color]::FromArgb(13, 148, 136)
+    $btnSaveApp.ForeColor = [System.Drawing.Color]::White
+    $btnSaveApp.FlatStyle = "Flat"
+    $dlgApp.Controls.Add($btnSaveApp)
+
+    $btnCancelApp = New-Object System.Windows.Forms.Button
+    $btnCancelApp.Text = "Cancel"
+    $btnCancelApp.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $btnCancelApp.Location = New-Object System.Drawing.Point(420, 260)
+    $btnCancelApp.Size = New-Object System.Drawing.Size(105, 34)
+    $dlgApp.Controls.Add($btnCancelApp)
+    $dlgApp.AcceptButton = $btnSaveApp
+    $dlgApp.CancelButton = $btnCancelApp
+
+    if ($dlgApp.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
+        $chosenApp = $txtAppPath.Text.Trim()
+        $chosenArgs = $txtAppArgs.Text.Trim()
+
+        if ($profObj.PSObject.Properties["LaunchApp"]) {
+            $profObj.LaunchApp = $chosenApp
+        } else {
+            $profObj | Add-Member -MemberType NoteProperty -Name "LaunchApp" -Value $chosenApp
+        }
+
+        if ($profObj.PSObject.Properties["LaunchAppArgs"]) {
+            $profObj.LaunchAppArgs = $chosenArgs
+        } else {
+            $profObj | Add-Member -MemberType NoteProperty -Name "LaunchAppArgs" -Value $chosenArgs
+        }
+
+        Save-LiveConfig -cfg $liveCfg
+        & $refreshMatrixGrid
+        $msg = if ($chosenApp) { "Profile '$targetProfName' will now launch:`n$chosenApp $chosenArgs" } else { "Application launch removed for '$targetProfName'." }
+        [System.Windows.Forms.MessageBox]::Show($msg, "Launch Settings Saved", "OK", "Information")
     }
 })
 

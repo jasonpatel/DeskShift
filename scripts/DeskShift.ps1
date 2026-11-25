@@ -133,6 +133,25 @@ function Sync-ProfileAudio {
     }
 }
 
+# Function to launch an application or script associated with the profile
+function Sync-ProfileLaunchApp {
+    param($ProfileItem)
+    if (-not $ProfileItem.LaunchApp -or -not $ProfileItem.LaunchApp.Trim()) { return }
+    $appTarget = $ProfileItem.LaunchApp.Trim()
+    $appArgs = if ($ProfileItem.LaunchAppArgs) { $ProfileItem.LaunchAppArgs.Trim() } else { "" }
+
+    Write-Host "Triggering post-switch application launch: $appTarget $appArgs" -ForegroundColor Cyan
+    try {
+        if ($appArgs) {
+            Start-Process -FilePath $appTarget -ArgumentList $appArgs
+        } else {
+            Start-Process -FilePath $appTarget
+        }
+    } catch {
+        Write-Warning "Could not launch application '$appTarget': $_"
+    }
+}
+
 # Function to toggle USB hardware devices defined in profile
 function Sync-ProfileDevices {
     param($ProfileItem, $LiveConfig)
@@ -281,6 +300,7 @@ function Invoke-ProfileSwitch {
         $liveCfg = Get-CurrentConfig
         Sync-ProfileDevices -ProfileItem $ProfileItem -LiveConfig $liveCfg
         Sync-ProfileAudio -ProfileItem $ProfileItem
+        Sync-ProfileLaunchApp -ProfileItem $ProfileItem
 
         # If switching away from single screen (e.g. to Dual, TV, Rig), reset single toggle state
         if ($displayName -notlike "*Single*") {
