@@ -2605,7 +2605,7 @@ $saveBtn.add_Click({
     }
 
     # Manage Web Remote background process state
-    $appRoot = Split-Path $ConfigFile
+    $appRoot = Split-Path (Split-Path $ConfigFile)
     $webRemoteVbs = Join-Path $appRoot "web-remote\Run-Silent.vbs"
     if ($chkEnableWebRemote.Checked) {
         $nodeListening = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in @([int]$numWebPort.Value, 443) }
