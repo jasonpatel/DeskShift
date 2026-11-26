@@ -230,6 +230,7 @@ function New-TransformedWallpaper {
         [string]$SizingMode,
         [int]$OffsetX = 0,
         [int]$OffsetY = 0,
+        [double]$ScalePercent = 100.0,
         [bool]$FlipH = $false,
         [bool]$FlipV = $false,
         [string]$BgColorHex = "#000000",
@@ -266,37 +267,45 @@ function New-TransformedWallpaper {
 
         $srcW = $bmp.Width
         $srcH = $bmp.Height
+        $scaleMul = if ($ScalePercent -gt 0) { [Math]::Max(0.01, $ScalePercent / 100.0) } else { 1.0 }
 
         switch ($SizingMode) {
             "Stretch" {
-                $destRect = New-Object System.Drawing.Rectangle($OffsetX, $OffsetY, $TargetWidth, $TargetHeight)
+                $dw = [int]($TargetWidth * $scaleMul)
+                $dh = [int]($TargetHeight * $scaleMul)
+                $x = [int](($TargetWidth - $dw) / 2) + $OffsetX
+                $y = [int](($TargetHeight - $dh) / 2) + $OffsetY
+                $destRect = New-Object System.Drawing.Rectangle($x, $y, $dw, $dh)
                 $g.DrawImage($bmp, $destRect)
             }
             "Center" {
-                $x = [int](($TargetWidth - $srcW) / 2) + $OffsetX
-                $y = [int](($TargetHeight - $srcH) / 2) + $OffsetY
-                $destRect = New-Object System.Drawing.Rectangle($x, $y, $srcW, $srcH)
+                $dw = [int]($srcW * $scaleMul)
+                $dh = [int]($srcH * $scaleMul)
+                $x = [int](($TargetWidth - $dw) / 2) + $OffsetX
+                $y = [int](($TargetHeight - $dh) / 2) + $OffsetY
+                $destRect = New-Object System.Drawing.Rectangle($x, $y, $dw, $dh)
                 $g.DrawImage($bmp, $destRect)
             }
             "Tile" {
                 $tb = New-Object System.Drawing.TextureBrush($bmp)
+                if ($scaleMul -ne 1.0) { $tb.ScaleTransform($scaleMul, $scaleMul) }
                 $tb.TranslateTransform($OffsetX, $OffsetY)
                 $g.FillRectangle($tb, 0, 0, $TargetWidth, $TargetHeight)
                 $tb.Dispose()
             }
             "Fit" {
-                $scale = [Math]::Min($TargetWidth / $srcW, $TargetHeight / $srcH)
-                $drawW = [int]($srcW * $scale)
-                $drawH = [int]($srcH * $scale)
+                $baseScale = [Math]::Min($TargetWidth / $srcW, $TargetHeight / $srcH)
+                $drawW = [int]($srcW * $baseScale * $scaleMul)
+                $drawH = [int]($srcH * $baseScale * $scaleMul)
                 $x = [int](($TargetWidth - $drawW) / 2) + $OffsetX
                 $y = [int](($TargetHeight - $drawH) / 2) + $OffsetY
                 $destRect = New-Object System.Drawing.Rectangle($x, $y, $drawW, $drawH)
                 $g.DrawImage($bmp, $destRect)
             }
             default { # "Fill"
-                $scale = [Math]::Max($TargetWidth / $srcW, $TargetHeight / $srcH)
-                $drawW = [int]($srcW * $scale)
-                $drawH = [int]($srcH * $scale)
+                $baseScale = [Math]::Max($TargetWidth / $srcW, $TargetHeight / $srcH)
+                $drawW = [int]($srcW * $baseScale * $scaleMul)
+                $drawH = [int]($srcH * $baseScale * $scaleMul)
                 $x = [int](($TargetWidth - $drawW) / 2) + $OffsetX
                 $y = [int](($TargetHeight - $drawH) / 2) + $OffsetY
                 $destRect = New-Object System.Drawing.Rectangle($x, $y, $drawW, $drawH)
@@ -2845,49 +2854,66 @@ $btnWallpapers.add_Click({
     $lblAdjHelp.ForeColor = [System.Drawing.Color]::FromArgb(71, 85, 105)
     $tabAdjust.Controls.Add($lblAdjHelp)
 
+    # Sizing Scale (percent) & Rotation
+    $lblScale = New-Object System.Windows.Forms.Label
+    $lblScale.Text = "Scale (percent):"
+    $lblScale.Location = New-Object System.Drawing.Point(20, 48)
+    $lblScale.Size = New-Object System.Drawing.Size(120, 20)
+    $tabAdjust.Controls.Add($lblScale)
+
+    $numScale = New-Object System.Windows.Forms.NumericUpDown
+    $numScale.Minimum = 10
+    $numScale.Maximum = 500
+    $numScale.Value = 100
+    $numScale.DecimalPlaces = 2
+    $numScale.Increment = 5
+    $numScale.Location = New-Object System.Drawing.Point(20, 70)
+    $numScale.Size = New-Object System.Drawing.Size(110, 25)
+    $tabAdjust.Controls.Add($numScale)
+
     # Horizontal Offset
     $lblOffX = New-Object System.Windows.Forms.Label
-    $lblOffX.Text = "Move Horizontal (pixels):"
-    $lblOffX.Location = New-Object System.Drawing.Point(20, 48)
-    $lblOffX.Size = New-Object System.Drawing.Size(180, 20)
+    $lblOffX.Text = "Move Horizontal (px):"
+    $lblOffX.Location = New-Object System.Drawing.Point(150, 48)
+    $lblOffX.Size = New-Object System.Drawing.Size(130, 20)
     $tabAdjust.Controls.Add($lblOffX)
 
     $numOffX = New-Object System.Windows.Forms.NumericUpDown
     $numOffX.Minimum = -2000
     $numOffX.Maximum = 2000
     $numOffX.Value = 0
-    $numOffX.Location = New-Object System.Drawing.Point(20, 70)
-    $numOffX.Size = New-Object System.Drawing.Size(120, 25)
+    $numOffX.Location = New-Object System.Drawing.Point(150, 70)
+    $numOffX.Size = New-Object System.Drawing.Size(110, 25)
     $tabAdjust.Controls.Add($numOffX)
 
     # Vertical Offset (Start bar offset)
     $lblOffY = New-Object System.Windows.Forms.Label
-    $lblOffY.Text = "Move Vertical (pixels - e.g. taskbar offset):"
-    $lblOffY.Location = New-Object System.Drawing.Point(220, 48)
-    $lblOffY.Size = New-Object System.Drawing.Size(260, 20)
+    $lblOffY.Text = "Move Vertical (px - e.g. taskbar):"
+    $lblOffY.Location = New-Object System.Drawing.Point(280, 48)
+    $lblOffY.Size = New-Object System.Drawing.Size(190, 20)
     $tabAdjust.Controls.Add($lblOffY)
 
     $numOffY = New-Object System.Windows.Forms.NumericUpDown
     $numOffY.Minimum = -2000
     $numOffY.Maximum = 2000
     $numOffY.Value = 0
-    $numOffY.Location = New-Object System.Drawing.Point(220, 70)
-    $numOffY.Size = New-Object System.Drawing.Size(120, 25)
+    $numOffY.Location = New-Object System.Drawing.Point(280, 70)
+    $numOffY.Size = New-Object System.Drawing.Size(110, 25)
     $tabAdjust.Controls.Add($numOffY)
 
     # Quick taskbar buttons
     $btnTaskbarDown48 = New-Object System.Windows.Forms.Button
-    $btnTaskbarDown48.Text = "Offset +48px (Bottom Taskbar)"
-    $btnTaskbarDown48.Location = New-Object System.Drawing.Point(355, 68)
-    $btnTaskbarDown48.Size = New-Object System.Drawing.Size(200, 28)
+    $btnTaskbarDown48.Text = "Offset +48px (Taskbar)"
+    $btnTaskbarDown48.Location = New-Object System.Drawing.Point(410, 68)
+    $btnTaskbarDown48.Size = New-Object System.Drawing.Size(160, 28)
     $btnTaskbarDown48.BackColor = [System.Drawing.Color]::FromArgb(241, 245, 249)
     $btnTaskbarDown48.FlatStyle = "Flat"
     $tabAdjust.Controls.Add($btnTaskbarDown48)
 
     $btnTaskbarUp48 = New-Object System.Windows.Forms.Button
-    $btnTaskbarUp48.Text = "Offset -48px (Top Taskbar)"
-    $btnTaskbarUp48.Location = New-Object System.Drawing.Point(565, 68)
-    $btnTaskbarUp48.Size = New-Object System.Drawing.Size(180, 28)
+    $btnTaskbarUp48.Text = "Offset -48px"
+    $btnTaskbarUp48.Location = New-Object System.Drawing.Point(580, 68)
+    $btnTaskbarUp48.Size = New-Object System.Drawing.Size(100, 28)
     $btnTaskbarUp48.BackColor = [System.Drawing.Color]::FromArgb(241, 245, 249)
     $btnTaskbarUp48.FlatStyle = "Flat"
     $tabAdjust.Controls.Add($btnTaskbarUp48)
@@ -2943,6 +2969,64 @@ $btnWallpapers.add_Click({
     $btnPickColor.FlatStyle = "Flat"
     $tabAdjust.Controls.Add($btnPickColor)
 
+    # Multi-Monitor Span Bezel Gap / Edge Offset Section
+    $lblBezelHeader = New-Object System.Windows.Forms.Label
+    $lblBezelHeader.Text = "Multi-Monitor Span Gap / Bezel Compensation (Pixels):"
+    $lblBezelHeader.Font = New-Object System.Drawing.Font("Segoe UI", 9.0, [System.Drawing.FontStyle]::Bold)
+    $lblBezelHeader.Location = New-Object System.Drawing.Point(20, 255)
+    $lblBezelHeader.Size = New-Object System.Drawing.Size(420, 20)
+    $tabAdjust.Controls.Add($lblBezelHeader)
+
+    $chkPerEdgeGap = New-Object System.Windows.Forms.CheckBox
+    $chkPerEdgeGap.Text = "Customize gap per adjacent monitor boundary (Individual edges)"
+    $chkPerEdgeGap.Location = New-Object System.Drawing.Point(450, 255)
+    $chkPerEdgeGap.Size = New-Object System.Drawing.Size(370, 22)
+    $tabAdjust.Controls.Add($chkPerEdgeGap)
+
+    $lblBezelGap = New-Object System.Windows.Forms.Label
+    $lblBezelGap.Text = "Uniform Bezel Gap:"
+    $lblBezelGap.Location = New-Object System.Drawing.Point(20, 282)
+    $lblBezelGap.Size = New-Object System.Drawing.Size(120, 20)
+    $tabAdjust.Controls.Add($lblBezelGap)
+
+    $numBezelGap = New-Object System.Windows.Forms.NumericUpDown
+    $numBezelGap.Minimum = 0
+    $numBezelGap.Maximum = 500
+    $numBezelGap.Value = 0
+    $numBezelGap.Location = New-Object System.Drawing.Point(145, 280)
+    $numBezelGap.Size = New-Object System.Drawing.Size(90, 25)
+    $tabAdjust.Controls.Add($numBezelGap)
+
+    $lblEdgePick = New-Object System.Windows.Forms.Label
+    $lblEdgePick.Text = "Border Edge:"
+    $lblEdgePick.Location = New-Object System.Drawing.Point(260, 282)
+    $lblEdgePick.Size = New-Object System.Drawing.Size(85, 20)
+    $lblEdgePick.Visible = $false
+    $tabAdjust.Controls.Add($lblEdgePick)
+
+    $cmbEdgePick = New-Object System.Windows.Forms.ComboBox
+    $cmbEdgePick.DropDownStyle = "DropDownList"
+    $cmbEdgePick.Location = New-Object System.Drawing.Point(345, 279)
+    $cmbEdgePick.Size = New-Object System.Drawing.Size(180, 25)
+    $cmbEdgePick.Visible = $false
+    $tabAdjust.Controls.Add($cmbEdgePick)
+
+    $lblPerEdgeGap = New-Object System.Windows.Forms.Label
+    $lblPerEdgeGap.Text = "Edge Gap (px):"
+    $lblPerEdgeGap.Location = New-Object System.Drawing.Point(535, 282)
+    $lblPerEdgeGap.Size = New-Object System.Drawing.Size(95, 20)
+    $lblPerEdgeGap.Visible = $false
+    $tabAdjust.Controls.Add($lblPerEdgeGap)
+
+    $numPerEdgeGap = New-Object System.Windows.Forms.NumericUpDown
+    $numPerEdgeGap.Minimum = 0
+    $numPerEdgeGap.Maximum = 500
+    $numPerEdgeGap.Value = 0
+    $numPerEdgeGap.Location = New-Object System.Drawing.Point(630, 280)
+    $numPerEdgeGap.Size = New-Object System.Drawing.Size(80, 25)
+    $numPerEdgeGap.Visible = $false
+    $tabAdjust.Controls.Add($numPerEdgeGap)
+
     $wallTabControl.TabPages.Add($tabAdjust)
 
     # Dynamic Profile State Container
@@ -2951,6 +3035,7 @@ $btnWallpapers.add_Click({
     $wallState = [ordered]@{}
     $adjState = [ordered]@{}
     $spanImageState = ""
+    $perEdgeGaps = [ordered]@{}
     $isLoadingProfile = $false
 
     $posKeyMap = @{
@@ -2982,9 +3067,16 @@ $btnWallpapers.add_Click({
         if ($adjState.Contains($curKey)) {
             $adjState[$curKey].OffsetX = [int]$numOffX.Value
             $adjState[$curKey].OffsetY = [int]$numOffY.Value
+            $adjState[$curKey].ScalePercent = [double]$numScale.Value
             $adjState[$curKey].FlipH = [bool]$chkFlipH.Checked
             $adjState[$curKey].FlipV = [bool]$chkFlipV.Checked
             $adjState[$curKey].BgColor = $txtBgColorHex.Text.Trim()
+        }
+
+        # If currently editing a per-edge gap, save it
+        if ($cmbEdgePick.SelectedItem) {
+            $selEdge = $cmbEdgePick.SelectedItem.ToString()
+            $script:perEdgeGaps[$selEdge] = [int]$numPerEdgeGap.Value
         }
 
         $cleanMonitors = [ordered]@{}
@@ -2998,13 +3090,21 @@ $btnWallpapers.add_Click({
             $cleanAdjustments[$k] = $adjState[$k]
         }
 
+        $cleanEdgeGaps = [ordered]@{}
+        foreach ($k in $script:perEdgeGaps.Keys) {
+            $cleanEdgeGaps[$k] = [int]$script:perEdgeGaps[$k]
+        }
+
         $posName = $posKeyMap[$cmbSizing.SelectedIndex]
         $wObj = [PSCustomObject]@{
-            Enabled     = [bool]$chkEnableWall.Checked
-            Position    = $posName
-            Monitors    = $cleanMonitors
-            Adjustments = $cleanAdjustments
-            SpanImage   = $script:spanImageState
+            Enabled        = [bool]$chkEnableWall.Checked
+            Position       = $posName
+            Monitors       = $cleanMonitors
+            Adjustments    = $cleanAdjustments
+            SpanImage      = $script:spanImageState
+            BezelGap       = [int]$numBezelGap.Value
+            CustomEdgeGaps = [bool]$chkPerEdgeGap.Checked
+            EdgeGaps       = $cleanEdgeGaps
         }
 
         if ($prof.PSObject.Properties["Wallpapers"]) {
@@ -3113,11 +3213,12 @@ $btnWallpapers.add_Click({
             foreach ($prop in $profObj.Wallpapers.Adjustments.PSObject.Properties) {
                 $val = $prop.Value
                 $adjState[$prop.Name] = [ordered]@{
-                    OffsetX = if ($val.PSObject.Properties["OffsetX"]) { [int]$val.OffsetX } else { 0 }
-                    OffsetY = if ($val.PSObject.Properties["OffsetY"]) { [int]$val.OffsetY } else { 0 }
-                    FlipH   = if ($val.PSObject.Properties["FlipH"]) { [bool]$val.FlipH } else { $false }
-                    FlipV   = if ($val.PSObject.Properties["FlipV"]) { [bool]$val.FlipV } else { $false }
-                    BgColor = if ($val.PSObject.Properties["BgColor"]) { $val.BgColor } else { "#000000" }
+                    OffsetX      = if ($val.PSObject.Properties["OffsetX"]) { [int]$val.OffsetX } else { 0 }
+                    OffsetY      = if ($val.PSObject.Properties["OffsetY"]) { [int]$val.OffsetY } else { 0 }
+                    ScalePercent = if ($val.PSObject.Properties["ScalePercent"]) { [double]$val.ScalePercent } else { 100.0 }
+                    FlipH        = if ($val.PSObject.Properties["FlipH"]) { [bool]$val.FlipH } else { $false }
+                    FlipV        = if ($val.PSObject.Properties["FlipV"]) { [bool]$val.FlipV } else { $false }
+                    BgColor      = if ($val.PSObject.Properties["BgColor"]) { $val.BgColor } else { "#000000" }
                 }
             }
         }
@@ -3125,13 +3226,37 @@ $btnWallpapers.add_Click({
             $k = "$m"
             if (-not $adjState.Contains($k)) {
                 $adjState[$k] = [ordered]@{
-                    OffsetX = 0
-                    OffsetY = 0
-                    FlipH   = $false
-                    FlipV   = $false
-                    BgColor = "#000000"
+                    OffsetX      = 0
+                    OffsetY      = 0
+                    ScalePercent = 100.0
+                    FlipH        = $false
+                    FlipV        = $false
+                    BgColor      = "#000000"
                 }
             }
+        }
+
+        # Populate Bezel gap and Edge gaps
+        $numBezelGap.Value = if ($profObj.Wallpapers -and $profObj.Wallpapers.BezelGap) { [Math]::Max(0, [int]$profObj.Wallpapers.BezelGap) } else { 0 }
+        $chkPerEdgeGap.Checked = if ($profObj.Wallpapers -and $profObj.Wallpapers.CustomEdgeGaps) { [bool]$profObj.Wallpapers.CustomEdgeGaps } else { $false }
+        $script:perEdgeGaps.Clear()
+        if ($profObj.Wallpapers -and $profObj.Wallpapers.EdgeGaps) {
+            foreach ($prop in $profObj.Wallpapers.EdgeGaps.PSObject.Properties) {
+                $script:perEdgeGaps[$prop.Name] = [int]$prop.Value
+            }
+        }
+
+        # Populate Edge selector combobox based on adjacent monitors
+        $cmbEdgePick.Items.Clear()
+        if ($mons.Count -gt 1) {
+            for ($e = 0; $e -lt ($mons.Count - 1); $e++) {
+                $edgeName = "Edge $($e + 1) (M$($e + 1) - M$($e + 2))"
+                $cmbEdgePick.Items.Add($edgeName) | Out-Null
+                if (-not $script:perEdgeGaps.Contains($edgeName)) {
+                    $script:perEdgeGaps[$edgeName] = [int]$numBezelGap.Value
+                }
+            }
+            if ($cmbEdgePick.Items.Count -gt 0) { $cmbEdgePick.SelectedIndex = 0 }
         }
 
         $script:isLoadingProfile = $false
@@ -3180,10 +3305,27 @@ $btnWallpapers.add_Click({
             $adj = $adjState[$key]
             $numOffX.Value = [int]$adj.OffsetX
             $numOffY.Value = [int]$adj.OffsetY
+            $numScale.Value = if ($adj.ScalePercent -and [double]$adj.ScalePercent -ge 10 -and [double]$adj.ScalePercent -le 500) { [decimal]$adj.ScalePercent } else { 100 }
             $chkFlipH.Checked = [bool]$adj.FlipH
             $chkFlipV.Checked = [bool]$adj.FlipV
             $txtBgColorHex.Text = $adj.BgColor
             try { $pnlColorPreview.BackColor = [System.Drawing.ColorTranslator]::FromHtml($adj.BgColor) } catch {}
+        }
+
+        # Update per-edge gap visibility and controls
+        $showEdgeGaps = $chkPerEdgeGap.Checked
+        $lblEdgePick.Visible = $showEdgeGaps
+        $cmbEdgePick.Visible = $showEdgeGaps
+        $lblPerEdgeGap.Visible = $showEdgeGaps
+        $numPerEdgeGap.Visible = $showEdgeGaps
+
+        if ($cmbEdgePick.SelectedItem) {
+            $curEdge = $cmbEdgePick.SelectedItem.ToString()
+            if ($script:perEdgeGaps.Contains($curEdge)) {
+                $numPerEdgeGap.Value = [int]$script:perEdgeGaps[$curEdge]
+            } else {
+                $numPerEdgeGap.Value = [int]$numBezelGap.Value
+            }
         }
         $pnlCanvas.Invalidate()
     }
@@ -3240,6 +3382,60 @@ $btnWallpapers.add_Click({
             $adjState[$key].OffsetY = [int]$numOffY.Value
         }
         $pnlCanvas.Invalidate()
+    })
+
+    $numScale.add_ValueChanged({
+        if ($script:isLoadingProfile) { return }
+        $key = & $getCurMonKey
+        if ($adjState.Contains($key)) {
+            $adjState[$key].ScalePercent = [double]$numScale.Value
+        }
+        $pnlCanvas.Invalidate()
+    })
+
+    $numBezelGap.add_ValueChanged({
+        if ($script:isLoadingProfile) { return }
+        if (-not $chkPerEdgeGap.Checked) {
+            # Sync to all edges
+            foreach ($k in @($script:perEdgeGaps.Keys)) {
+                $script:perEdgeGaps[$k] = [int]$numBezelGap.Value
+            }
+            if ($cmbEdgePick.SelectedItem) {
+                $numPerEdgeGap.Value = [int]$numBezelGap.Value
+            }
+        }
+        $pnlCanvas.Invalidate()
+    })
+
+    $chkPerEdgeGap.add_CheckedChanged({
+        if ($script:isLoadingProfile) { return }
+        $show = $chkPerEdgeGap.Checked
+        $lblEdgePick.Visible = $show
+        $cmbEdgePick.Visible = $show
+        $lblPerEdgeGap.Visible = $show
+        $numPerEdgeGap.Visible = $show
+        $pnlCanvas.Invalidate()
+    })
+
+    $cmbEdgePick.add_SelectedIndexChanged({
+        if ($script:isLoadingProfile) { return }
+        if ($cmbEdgePick.SelectedItem) {
+            $edge = $cmbEdgePick.SelectedItem.ToString()
+            if ($script:perEdgeGaps.Contains($edge)) {
+                $numPerEdgeGap.Value = [int]$script:perEdgeGaps[$edge]
+            } else {
+                $numPerEdgeGap.Value = [int]$numBezelGap.Value
+            }
+        }
+    })
+
+    $numPerEdgeGap.add_ValueChanged({
+        if ($script:isLoadingProfile) { return }
+        if ($cmbEdgePick.SelectedItem) {
+            $edge = $cmbEdgePick.SelectedItem.ToString()
+            $script:perEdgeGaps[$edge] = [int]$numPerEdgeGap.Value
+            $pnlCanvas.Invalidate()
+        }
     })
 
     $chkFlipH.add_CheckedChanged({
@@ -3391,37 +3587,76 @@ $btnWallpapers.add_Click({
 
                 $offX = if ($adj) { [int]($adj.OffsetX * $pxScaleX) } else { 0 }
                 $offY = if ($adj) { [int]($adj.OffsetY * $pxScaleY) } else { 0 }
+                $scaleMul = if ($adj -and $adj.ScalePercent) { [Math]::Max(0.01, [double]$adj.ScalePercent / 100.0) } else { 1.0 }
 
                 $sizing = if ($cmbSizing.SelectedItem) { $cmbSizing.SelectedItem.ToString() } else { "Fill" }
                 $iw = $imgToDraw.Width
                 $ih = $imgToDraw.Height
 
                 if ($cmbSizing.SelectedIndex -eq 5) {
-                    # Span mode: image spans across the entire multi-monitor bounding box
-                    $spanScale = [Math]::Max($availW / $iw, $availH / $ih)
-                    $sdw = [int]($iw * $spanScale)
-                    $sdh = [int]($ih * $spanScale)
-                    $sdx = 20 + [int](($availW - $sdw) / 2) + $offX
-                    $sdy = 15 + [int](($availH - $sdh) / 2) + $offY
-                    $g.DrawImage($imgToDraw, $sdx, $sdy, $sdw, $sdh)
+                    # Span mode with Bezel / Gap offset compensation
+                    # Calculate cumulative horizontal gap up to monitor i
+                    $cumGap = 0
+                    $totalBezelGaps = 0
+                    if ($mons.Count -gt 1) {
+                        for ($edgeIdx = 0; $edgeIdx -lt ($mons.Count - 1); $edgeIdx++) {
+                            $eName = "Edge $($edgeIdx + 1) (M$($edgeIdx + 1) - M$($edgeIdx + 2))"
+                            $eGap = if ($chkPerEdgeGap.Checked -and $script:perEdgeGaps.Contains($eName)) {
+                                [int]$script:perEdgeGaps[$eName]
+                            } else {
+                                [int]$numBezelGap.Value
+                            }
+                            $totalBezelGaps += $eGap
+                            if ($edgeIdx -lt $i) {
+                                $cumGap += $eGap
+                            }
+                        }
+                    }
+
+                    $virtTotalW = $totalW + $totalBezelGaps
+                    $spanScale = [Math]::Max($availW / $virtTotalW, $availH / $totalH)
+                    $imgBaseScale = [Math]::Max($virtTotalW / $iw, $totalH / $ih) * $scaleMul
+                    $sdw = [int]($iw * $imgBaseScale * $scale)
+                    $sdh = [int]($ih * $imgBaseScale * $scale)
+
+                    # Virtual coordinate of this monitor including preceding gaps
+                    $virtMonLeft = ($mon.Left - $minX) + $cumGap
+                    $virtMonTop = ($mon.Top - $minY)
+                    $monScreenRx = $drawOffsetX + [int]($virtMonLeft * $scale)
+                    $monScreenRy = $drawOffsetY + [int]($virtMonTop * $scale)
+
+                    $virtCanvasW = [int]($virtTotalW * $scale)
+                    $virtCanvasH = [int]($totalH * $scale)
+                    $baseImgX = $drawOffsetX + [int](($virtCanvasW - $sdw) / 2) + $offX
+                    $baseImgY = $drawOffsetY + [int](($virtCanvasH - $sdh) / 2) + $offY
+
+                    # Shift drawn image for monitor i so the physical monitor cutout aligns perfectly
+                    $drawX = $baseImgX - [int]($cumGap * $scale)
+                    $drawY = $baseImgY
+
+                    $g.DrawImage($imgToDraw, $drawX, $drawY, $sdw, $sdh)
                 } elseif ($sizing -like "*Fit Best*") {
-                    $imgScale = [Math]::Min($rw / $iw, $rh / $ih)
+                    $imgScale = [Math]::Min($rw / $iw, $rh / $ih) * $scaleMul
                     $dw = [int]($iw * $imgScale)
                     $dh = [int]($ih * $imgScale)
                     $dx = $rx + [int](($rw - $dw) / 2) + $offX
                     $dy = $ry + [int](($rh - $dh) / 2) + $offY
                     $g.DrawImage($imgToDraw, $dx, $dy, $dw, $dh)
                 } elseif ($sizing -like "*Stretch*") {
-                    $g.DrawImage($imgToDraw, $rx + $offX, $ry + $offY, $rw, $rh)
+                    $dw = [int]($rw * $scaleMul)
+                    $dh = [int]($rh * $scaleMul)
+                    $dx = $rx + [int](($rw - $dw) / 2) + $offX
+                    $dy = $ry + [int](($rh - $dh) / 2) + $offY
+                    $g.DrawImage($imgToDraw, $dx, $dy, $dw, $dh)
                 } elseif ($sizing -like "*Center*") {
-                    $dw = [int]($iw * $pxScaleX)
-                    $dh = [int]($ih * $pxScaleY)
+                    $dw = [int]($iw * $pxScaleX * $scaleMul)
+                    $dh = [int]($ih * $pxScaleY * $scaleMul)
                     $dx = $rx + [int](($rw - $dw) / 2) + $offX
                     $dy = $ry + [int](($rh - $dh) / 2) + $offY
                     $g.DrawImage($imgToDraw, $dx, $dy, $dw, $dh)
                 } else {
                     # Fill: fit and clip
-                    $imgScale = [Math]::Max($rw / $iw, $rh / $ih)
+                    $imgScale = [Math]::Max($rw / $iw, $rh / $ih) * $scaleMul
                     $dw = [int]($iw * $imgScale)
                     $dh = [int]($ih * $imgScale)
                     $dx = $rx + [int](($rw - $dw) / 2) + $offX
@@ -3532,6 +3767,7 @@ $btnWallpapers.add_Click({
         if ($adjState.Contains($curKey)) {
             $adjState[$curKey].OffsetX = [int]$numOffX.Value
             $adjState[$curKey].OffsetY = [int]$numOffY.Value
+            $adjState[$curKey].ScalePercent = [double]$numScale.Value
             $adjState[$curKey].FlipH = [bool]$chkFlipH.Checked
             $adjState[$curKey].FlipV = [bool]$chkFlipV.Checked
             $adjState[$curKey].BgColor = $txtBgColorHex.Text.Trim()
@@ -3540,7 +3776,64 @@ $btnWallpapers.add_Click({
         if ($posCode -eq 5) {
             $spanImg = $txtImgPath.Text.Trim()
             if ($spanImg -and (Test-Path -LiteralPath $spanImg)) {
-                [DesktopWallpaperNative]::ApplyWallpaper($null, $spanImg, 5) | Out-Null
+                $hasBezelComp = ($numBezelGap.Value -gt 0 -or $chkPerEdgeGap.Checked)
+                if ($hasBezelComp -and $activeLiveMons.Count -gt 1) {
+                    # Spliced span with bezel gap compensation per monitor
+                    $totalGap = 0
+                    $cumGaps = @()
+                    for ($e = 0; $e -lt ($activeLiveMons.Count - 1); $e++) {
+                        $eName = "Edge $($e + 1) (M$($e + 1) - M$($e + 2))"
+                        $eGap = if ($chkPerEdgeGap.Checked -and $script:perEdgeGaps.Contains($eName)) { [int]$script:perEdgeGaps[$eName] } else { [int]$numBezelGap.Value }
+                        $cumGaps += $totalGap
+                        $totalGap += $eGap
+                    }
+                    $cumGaps += $totalGap
+
+                    $minX = ($activeLiveMons | Measure-Object -Property Left -Minimum).Minimum
+                    $maxX = ($activeLiveMons | Measure-Object -Property Right -Maximum).Maximum
+                    $minY = ($activeLiveMons | Measure-Object -Property Top -Minimum).Minimum
+                    $maxY = ($activeLiveMons | Measure-Object -Property Bottom -Maximum).Maximum
+                    $vTotalW = ($maxX - $minX) + $totalGap
+                    $vTotalH = [Math]::Max(100, $maxY - $minY)
+
+                    $cacheDir = Join-Path $env:LOCALAPPDATA "DeskShift\WallpaperCache"
+                    if (-not (Test-Path $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null }
+
+                    for ($m = 0; $m -lt $activeLiveMons.Count; $m++) {
+                        $mon = $activeLiveMons[$m]
+                        $tW = $mon.Right - $mon.Left
+                        $tH = $mon.Bottom - $mon.Top
+                        $monVirtX = ($mon.Left - $minX) + $cumGaps[$m]
+                        $monVirtY = ($mon.Top - $minY)
+                        $cleanProf = ($script:curProfName -replace '[^a-zA-Z0-9_\-]', '_')
+                        $renderedOut = Join-Path $cacheDir "preview_${cleanProf}_span_mon$($m+1).png"
+                        
+                        # Generate sliced span wallpaper
+                        $srcImg = [System.Drawing.Image]::FromFile($spanImg)
+                        $sScale = [Math]::Max($vTotalW / $srcImg.Width, $vTotalH / $srcImg.Height)
+                        $scaledW = [int]($srcImg.Width * $sScale)
+                        $scaledH = [int]($srcImg.Height * $sScale)
+                        $fullBmp = New-Object System.Drawing.Bitmap($vTotalW, $vTotalH)
+                        $fg = [System.Drawing.Graphics]::FromImage($fullBmp)
+                        $fg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                        $fg.DrawImage($srcImg, [int](($vTotalW - $scaledW) / 2), [int](($vTotalH - $scaledH) / 2), $scaledW, $scaledH)
+                        $fg.Dispose()
+                        $srcImg.Dispose()
+
+                        $sliceBmp = New-Object System.Drawing.Bitmap($tW, $tH)
+                        $sg = [System.Drawing.Graphics]::FromImage($sliceBmp)
+                        $sg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                        $sg.DrawImage($fullBmp, (New-Object System.Drawing.Rectangle(0, 0, $tW, $tH)), (New-Object System.Drawing.Rectangle($monVirtX, $monVirtY, $tW, $tH)), [System.Drawing.GraphicsUnit]::Pixel)
+                        $sg.Dispose()
+                        $fullBmp.Dispose()
+                        $sliceBmp.Save($renderedOut, [System.Drawing.Imaging.ImageFormat]::Png)
+                        $sliceBmp.Dispose()
+
+                        [DesktopWallpaperNative]::ApplyWallpaper($mon.Path, $renderedOut, 4) | Out-Null
+                    }
+                } else {
+                    [DesktopWallpaperNative]::ApplyWallpaper($null, $spanImg, 5) | Out-Null
+                }
             } else {
                 [System.Windows.Forms.MessageBox]::Show("Please choose a valid image file to test span mode.", "No Image", "OK", "Warning")
             }
@@ -3555,20 +3848,22 @@ $btnWallpapers.add_Click({
                     $targetW = [Math]::Max(100, $mon.Right - $mon.Left)
                     $targetH = [Math]::Max(100, $mon.Bottom - $mon.Top)
 
+                    $scaleP = if ($adj -and $adj.ScalePercent) { [double]$adj.ScalePercent } else { 100.0 }
                     $hasTransformation = ($adj -and (
                         ($adj.OffsetX -and [int]$adj.OffsetX -ne 0) -or
                         ($adj.OffsetY -and [int]$adj.OffsetY -ne 0) -or
+                        ($scaleP -ne 100.0) -or
                         ($adj.FlipH -and [bool]$adj.FlipH) -or
                         ($adj.FlipV -and [bool]$adj.FlipV) -or
                         ($adj.BgColor -and $adj.BgColor -ne "#000000" -and $adj.BgColor -ne "#000")
                     ))
 
                     if ($hasTransformation) {
-                        $hashKey = "$($adj.OffsetX)_$($adj.OffsetY)_$($adj.FlipH)_$($adj.FlipV)_$($adj.BgColor)_$($posKeyMap[$posCode])"
+                        $hashKey = "$($adj.OffsetX)_$($adj.OffsetY)_$($scaleP)_$($adj.FlipH)_$($adj.FlipV)_$($adj.BgColor)_$($posKeyMap[$posCode])"
                         $hash = [Math]::Abs($hashKey.GetHashCode())
                         $cleanProf = ($script:curProfName -replace '[^a-zA-Z0-9_\-]', '_')
                         $renderedOut = Join-Path $cacheDir "preview_${cleanProf}_mon${k}_${hash}.png"
-                        $appliedImg = New-TransformedWallpaper -SourcePath $img -TargetWidth $targetW -TargetHeight $targetH -SizingMode $posKeyMap[$posCode] -OffsetX ([int]$adj.OffsetX) -OffsetY ([int]$adj.OffsetY) -FlipH ([bool]$adj.FlipH) -FlipV ([bool]$adj.FlipV) -BgColorHex $adj.BgColor -OutputPath $renderedOut
+                        $appliedImg = New-TransformedWallpaper -SourcePath $img -TargetWidth $targetW -TargetHeight $targetH -SizingMode $posKeyMap[$posCode] -OffsetX ([int]$adj.OffsetX) -OffsetY ([int]$adj.OffsetY) -ScalePercent $scaleP -FlipH ([bool]$adj.FlipH) -FlipV ([bool]$adj.FlipV) -BgColorHex $adj.BgColor -OutputPath $renderedOut
                         if ($appliedImg) {
                             [DesktopWallpaperNative]::ApplyWallpaper($mon.Path, $appliedImg, 4) | Out-Null
                             continue

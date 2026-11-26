@@ -304,6 +304,7 @@ function New-TransformedWallpaper {
         [string]$SizingMode,
         [int]$OffsetX = 0,
         [int]$OffsetY = 0,
+        [double]$ScalePercent = 100.0,
         [bool]$FlipH = $false,
         [bool]$FlipV = $false,
         [string]$BgColorHex = "#000000",
@@ -340,37 +341,45 @@ function New-TransformedWallpaper {
 
         $srcW = $bmp.Width
         $srcH = $bmp.Height
+        $scaleMul = if ($ScalePercent -gt 0) { [Math]::Max(0.01, $ScalePercent / 100.0) } else { 1.0 }
 
         switch ($SizingMode) {
             "Stretch" {
-                $destRect = New-Object System.Drawing.Rectangle($OffsetX, $OffsetY, $TargetWidth, $TargetHeight)
+                $dw = [int]($TargetWidth * $scaleMul)
+                $dh = [int]($TargetHeight * $scaleMul)
+                $x = [int](($TargetWidth - $dw) / 2) + $OffsetX
+                $y = [int](($TargetHeight - $dh) / 2) + $OffsetY
+                $destRect = New-Object System.Drawing.Rectangle($x, $y, $dw, $dh)
                 $g.DrawImage($bmp, $destRect)
             }
             "Center" {
-                $x = [int](($TargetWidth - $srcW) / 2) + $OffsetX
-                $y = [int](($TargetHeight - $srcH) / 2) + $OffsetY
-                $destRect = New-Object System.Drawing.Rectangle($x, $y, $srcW, $srcH)
+                $dw = [int]($srcW * $scaleMul)
+                $dh = [int]($srcH * $scaleMul)
+                $x = [int](($TargetWidth - $dw) / 2) + $OffsetX
+                $y = [int](($TargetHeight - $dh) / 2) + $OffsetY
+                $destRect = New-Object System.Drawing.Rectangle($x, $y, $dw, $dh)
                 $g.DrawImage($bmp, $destRect)
             }
             "Tile" {
                 $tb = New-Object System.Drawing.TextureBrush($bmp)
+                if ($scaleMul -ne 1.0) { $tb.ScaleTransform($scaleMul, $scaleMul) }
                 $tb.TranslateTransform($OffsetX, $OffsetY)
                 $g.FillRectangle($tb, 0, 0, $TargetWidth, $TargetHeight)
                 $tb.Dispose()
             }
             "Fit" {
-                $scale = [Math]::Min($TargetWidth / $srcW, $TargetHeight / $srcH)
-                $drawW = [int]($srcW * $scale)
-                $drawH = [int]($srcH * $scale)
+                $baseScale = [Math]::Min($TargetWidth / $srcW, $TargetHeight / $srcH)
+                $drawW = [int]($srcW * $baseScale * $scaleMul)
+                $drawH = [int]($srcH * $baseScale * $scaleMul)
                 $x = [int](($TargetWidth - $drawW) / 2) + $OffsetX
                 $y = [int](($TargetHeight - $drawH) / 2) + $OffsetY
                 $destRect = New-Object System.Drawing.Rectangle($x, $y, $drawW, $drawH)
                 $g.DrawImage($bmp, $destRect)
             }
             default { # "Fill"
-                $scale = [Math]::Max($TargetWidth / $srcW, $TargetHeight / $srcH)
-                $drawW = [int]($srcW * $scale)
-                $drawH = [int]($srcH * $scale)
+                $baseScale = [Math]::Max($TargetWidth / $srcW, $TargetHeight / $srcH)
+                $drawW = [int]($srcW * $baseScale * $scaleMul)
+                $drawH = [int]($srcH * $baseScale * $scaleMul)
                 $x = [int](($TargetWidth - $drawW) / 2) + $OffsetX
                 $y = [int](($TargetHeight - $drawH) / 2) + $OffsetY
                 $destRect = New-Object System.Drawing.Rectangle($x, $y, $drawW, $drawH)
@@ -420,8 +429,70 @@ function Sync-ProfileWallpapers {
 
         # Mode A: Span across all monitors
         if ($wCfg.Position -eq "Span" -and $wCfg.SpanImage -and (Test-Path -LiteralPath $wCfg.SpanImage)) {
-            [DesktopWallpaperNative]::ApplyWallpaper($null, $wCfg.SpanImage, 5) | Out-Null
-            return
+            $hasBezelComp = ($wCfg.BezelGap -and [int]$wCfg.BezelGap -gt 0) -or ($wCfg.CustomEdgeGaps -and [bool]$wCfg.CustomEdgeGaps)
+            if ($hasBezelComp -and $activeMons.Count -gt 1) {
+                # Spliced span with bezel gap compensation per monitor
+                $totalGap = 0
+                $cumGaps = @()
+                for ($e = 0; $e -lt ($activeMons.Count - 1); $e++) {
+                    $eName = "Edge $($e + 1) (M$($e + 1) - M$($e + 2))"
+                    $eGap = if ($wCfg.CustomEdgeGaps -and $wCfg.EdgeGaps -and $wCfg.EdgeGaps.PSObject.Properties[$eName]) {
+                        [int]$wCfg.EdgeGaps.$eName
+                    } elseif ($wCfg.BezelGap) {
+                        [int]$wCfg.BezelGap
+                    } else { 0 }
+                    $cumGaps += $totalGap
+                    $totalGap += $eGap
+                }
+                $cumGaps += $totalGap
+
+                $minX = ($activeMons | Measure-Object -Property Left -Minimum).Minimum
+                $maxX = ($activeMons | Measure-Object -Property Right -Maximum).Maximum
+                $minY = ($activeMons | Measure-Object -Property Top -Minimum).Minimum
+                $maxY = ($activeMons | Measure-Object -Property Bottom -Maximum).Maximum
+                $vTotalW = ($maxX - $minX) + $totalGap
+                $vTotalH = [Math]::Max(100, $maxY - $minY)
+
+                $cacheDir = Join-Path $env:LOCALAPPDATA "DeskShift\WallpaperCache"
+                if (-not (Test-Path $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null }
+
+                for ($m = 0; $m -lt $activeMons.Count; $m++) {
+                    $mon = $activeMons[$m]
+                    $tW = $mon.Right - $mon.Left
+                    $tH = $mon.Bottom - $mon.Top
+                    $monVirtX = ($mon.Left - $minX) + $cumGaps[$m]
+                    $monVirtY = ($mon.Top - $minY)
+                    $cleanProf = ($ProfileItem.Name -replace '[^a-zA-Z0-9_\-]', '_')
+                    $renderedOut = Join-Path $cacheDir "${cleanProf}_span_mon$($m+1).png"
+                    
+                    # Generate sliced span wallpaper
+                    $srcImg = [System.Drawing.Image]::FromFile($wCfg.SpanImage)
+                    $sScale = [Math]::Max($vTotalW / $srcImg.Width, $vTotalH / $srcImg.Height)
+                    $scaledW = [int]($srcImg.Width * $sScale)
+                    $scaledH = [int]($srcImg.Height * $sScale)
+                    $fullBmp = New-Object System.Drawing.Bitmap($vTotalW, $vTotalH)
+                    $fg = [System.Drawing.Graphics]::FromImage($fullBmp)
+                    $fg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                    $fg.DrawImage($srcImg, [int](($vTotalW - $scaledW) / 2), [int](($vTotalH - $scaledH) / 2), $scaledW, $scaledH)
+                    $fg.Dispose()
+                    $srcImg.Dispose()
+
+                    $sliceBmp = New-Object System.Drawing.Bitmap($tW, $tH)
+                    $sg = [System.Drawing.Graphics]::FromImage($sliceBmp)
+                    $sg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                    $sg.DrawImage($fullBmp, (New-Object System.Drawing.Rectangle(0, 0, $tW, $tH)), (New-Object System.Drawing.Rectangle($monVirtX, $monVirtY, $tW, $tH)), [System.Drawing.GraphicsUnit]::Pixel)
+                    $sg.Dispose()
+                    $fullBmp.Dispose()
+                    $sliceBmp.Save($renderedOut, [System.Drawing.Imaging.ImageFormat]::Png)
+                    $sliceBmp.Dispose()
+
+                    [DesktopWallpaperNative]::ApplyWallpaper($mon.Path, $renderedOut, 4) | Out-Null
+                }
+                return
+            } else {
+                [DesktopWallpaperNative]::ApplyWallpaper($null, $wCfg.SpanImage, 5) | Out-Null
+                return
+            }
         }
 
         # Cache folder for transformed profile wallpapers
@@ -452,9 +523,11 @@ function Sync-ProfileWallpapers {
                         $targetW = [Math]::Max(100, $targetMon.Right - $targetMon.Left)
                         $targetH = [Math]::Max(100, $targetMon.Bottom - $targetMon.Top)
 
+                        $scaleP = if ($adj -and $adj.ScalePercent) { [double]$adj.ScalePercent } else { 100.0 }
                         $hasTransformation = ($adj -and (
                             ($adj.OffsetX -and [int]$adj.OffsetX -ne 0) -or
                             ($adj.OffsetY -and [int]$adj.OffsetY -ne 0) -or
+                            ($scaleP -ne 100.0) -or
                             ($adj.FlipH -and [bool]$adj.FlipH) -or
                             ($adj.FlipV -and [bool]$adj.FlipV) -or
                             ($adj.BgColor -and $adj.BgColor -ne "#000000" -and $adj.BgColor -ne "#000")
@@ -463,10 +536,10 @@ function Sync-ProfileWallpapers {
                         if ($hasTransformation) {
                             $cleanProf = ($ProfileItem.Name -replace '[^a-zA-Z0-9_\-]', '_')
                             # Unique filename per transform parameter to avoid stale cache hits
-                            $hashKey = "$($adj.OffsetX)_$($adj.OffsetY)_$($adj.FlipH)_$($adj.FlipV)_$($adj.BgColor)_$($wCfg.Position)"
+                            $hashKey = "$($adj.OffsetX)_$($adj.OffsetY)_$($scaleP)_$($adj.FlipH)_$($adj.FlipV)_$($adj.BgColor)_$($wCfg.Position)"
                             $hash = [Math]::Abs($hashKey.GetHashCode())
                             $renderedOut = Join-Path $cacheDir "${cleanProf}_mon${monIdxStr}_${hash}.png"
-                            $appliedImg = New-TransformedWallpaper -SourcePath $imgFile -TargetWidth $targetW -TargetHeight $targetH -SizingMode $wCfg.Position -OffsetX ([int]$adj.OffsetX) -OffsetY ([int]$adj.OffsetY) -FlipH ([bool]$adj.FlipH) -FlipV ([bool]$adj.FlipV) -BgColorHex $adj.BgColor -OutputPath $renderedOut
+                            $appliedImg = New-TransformedWallpaper -SourcePath $imgFile -TargetWidth $targetW -TargetHeight $targetH -SizingMode $wCfg.Position -OffsetX ([int]$adj.OffsetX) -OffsetY ([int]$adj.OffsetY) -ScalePercent $scaleP -FlipH ([bool]$adj.FlipH) -FlipV ([bool]$adj.FlipV) -BgColorHex $adj.BgColor -OutputPath $renderedOut
                             if ($appliedImg) {
                                 # When applying pre-rendered transformed image, use Fill (4) so it fills the monitor exactly without distortion
                                 [DesktopWallpaperNative]::ApplyWallpaper($targetMon.Path, $appliedImg, 4) | Out-Null
