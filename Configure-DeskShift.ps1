@@ -3769,6 +3769,7 @@ $btnWallpapers.add_Click({
             [System.Windows.Forms.MessageBox]::Show("Live preview is only possible when displays are currently active in Windows.", "Cannot Preview", "OK", "Information")
             return
         }
+        $activeLiveMons = @($activeLiveMons | Sort-Object Left, Top)
 
         # Force sync of current monitor controls to local state before rendering
         $curKey = & $getCurMonKey
@@ -3812,12 +3813,12 @@ $btnWallpapers.add_Click({
                     }
                     $cumGaps += $totalGap
 
-                    $minX = ($activeLiveMons | Measure-Object -Property Left -Minimum).Minimum
-                    $maxX = ($activeLiveMons | Measure-Object -Property Right -Maximum).Maximum
-                    $minY = ($activeLiveMons | Measure-Object -Property Top -Minimum).Minimum
-                    $maxY = ($activeLiveMons | Measure-Object -Property Bottom -Maximum).Maximum
-                    $vTotalW = ($maxX - $minX) + $totalGap
-                    $vTotalH = [Math]::Max(100, $maxY - $minY)
+                    $minX = [int](($activeLiveMons | Measure-Object -Property Left -Minimum).Minimum)
+                    $maxX = [int](($activeLiveMons | Measure-Object -Property Right -Maximum).Maximum)
+                    $minY = [int](($activeLiveMons | Measure-Object -Property Top -Minimum).Minimum)
+                    $maxY = [int](($activeLiveMons | Measure-Object -Property Bottom -Maximum).Maximum)
+                    $vTotalW = [int](($maxX - $minX) + $totalGap)
+                    $vTotalH = [int]([Math]::Max(100, $maxY - $minY))
 
                     $cacheDir = Join-Path $env:LOCALAPPDATA "DeskShift\WallpaperCache"
                     if (-not (Test-Path $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null }
@@ -3840,12 +3841,12 @@ $btnWallpapers.add_Click({
                     $scaledW = [int]($srcBmp.Width * $baseFitScale * $scaleMul)
                     $scaledH = [int]($srcBmp.Height * $baseFitScale * $scaleMul)
 
-                    $fullBmp = New-Object System.Drawing.Bitmap($vTotalW, $vTotalH)
+                    $fullBmp = New-Object System.Drawing.Bitmap([int]$vTotalW, [int]$vTotalH)
                     $fg = [System.Drawing.Graphics]::FromImage($fullBmp)
                     $fg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
                     $bgColor = try { [System.Drawing.ColorTranslator]::FromHtml($bgHex) } catch { [System.Drawing.Color]::Black }
                     $bgBrush = New-Object System.Drawing.SolidBrush($bgColor)
-                    $fg.FillRectangle($bgBrush, 0, 0, $vTotalW, $vTotalH)
+                    $fg.FillRectangle($bgBrush, 0, 0, [int]$vTotalW, [int]$vTotalH)
                     $bgBrush.Dispose()
 
                     $drawImgX = [int](($vTotalW - $scaledW) / 2) + $offX
@@ -3856,16 +3857,16 @@ $btnWallpapers.add_Click({
 
                     for ($m = 0; $m -lt $activeLiveMons.Count; $m++) {
                         $mon = $activeLiveMons[$m]
-                        $tW = $mon.Right - $mon.Left
-                        $tH = $mon.Bottom - $mon.Top
-                        $monVirtX = ($mon.Left - $minX) + $cumGaps[$m]
-                        $monVirtY = ($mon.Top - $minY)
+                        $tW = [int]($mon.Right - $mon.Left)
+                        $tH = [int]($mon.Bottom - $mon.Top)
+                        $monVirtX = [int](($mon.Left - $minX) + $cumGaps[$m])
+                        $monVirtY = [int]($mon.Top - $minY)
                         $cleanProf = ($script:curProfName -replace '[^a-zA-Z0-9_\-]', '_')
                         $hashKey = "${scaleP}_${offX}_${offY}_${totalGap}_${m}"
                         $hash = [Math]::Abs($hashKey.GetHashCode())
                         $renderedOut = Join-Path $cacheDir "preview_${cleanProf}_span_mon$($m+1)_${hash}.png"
 
-                        $sliceBmp = New-Object System.Drawing.Bitmap($tW, $tH)
+                        $sliceBmp = New-Object System.Drawing.Bitmap([int]$tW, [int]$tH)
                         $sg = [System.Drawing.Graphics]::FromImage($sliceBmp)
                         $sg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
                         $sg.DrawImage($fullBmp, (New-Object System.Drawing.Rectangle(0, 0, $tW, $tH)), (New-Object System.Drawing.Rectangle($monVirtX, $monVirtY, $tW, $tH)), [System.Drawing.GraphicsUnit]::Pixel)

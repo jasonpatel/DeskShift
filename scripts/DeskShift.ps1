@@ -426,6 +426,7 @@ function Sync-ProfileWallpapers {
     try {
         $activeMons = [DesktopWallpaperNative]::GetActiveMonitors()
         if (-not $activeMons -or $activeMons.Count -eq 0) { return }
+        $activeMons = @($activeMons | Sort-Object Left, Top)
 
         # Mode A: Span across all monitors
         if ($wCfg.Position -eq "Span" -and $wCfg.SpanImage -and (Test-Path -LiteralPath $wCfg.SpanImage)) {
@@ -456,12 +457,12 @@ function Sync-ProfileWallpapers {
                 }
                 $cumGaps += $totalGap
 
-                $minX = ($activeMons | Measure-Object -Property Left -Minimum).Minimum
-                $maxX = ($activeMons | Measure-Object -Property Right -Maximum).Maximum
-                $minY = ($activeMons | Measure-Object -Property Top -Minimum).Minimum
-                $maxY = ($activeMons | Measure-Object -Property Bottom -Maximum).Maximum
-                $vTotalW = ($maxX - $minX) + $totalGap
-                $vTotalH = [Math]::Max(100, $maxY - $minY)
+                $minX = [int](($activeMons | Measure-Object -Property Left -Minimum).Minimum)
+                $maxX = [int](($activeMons | Measure-Object -Property Right -Maximum).Maximum)
+                $minY = [int](($activeMons | Measure-Object -Property Top -Minimum).Minimum)
+                $maxY = [int](($activeMons | Measure-Object -Property Bottom -Maximum).Maximum)
+                $vTotalW = [int](($maxX - $minX) + $totalGap)
+                $vTotalH = [int]([Math]::Max(100, $maxY - $minY))
 
                 $cacheDir = Join-Path $env:LOCALAPPDATA "DeskShift\WallpaperCache"
                 if (-not (Test-Path $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null }
@@ -484,12 +485,12 @@ function Sync-ProfileWallpapers {
                 $scaledW = [int]($srcBmp.Width * $baseFitScale * $scaleMul)
                 $scaledH = [int]($srcBmp.Height * $baseFitScale * $scaleMul)
 
-                $fullBmp = New-Object System.Drawing.Bitmap($vTotalW, $vTotalH)
+                $fullBmp = New-Object System.Drawing.Bitmap([int]$vTotalW, [int]$vTotalH)
                 $fg = [System.Drawing.Graphics]::FromImage($fullBmp)
                 $fg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
                 $bgColor = try { [System.Drawing.ColorTranslator]::FromHtml($bgHex) } catch { [System.Drawing.Color]::Black }
                 $bgBrush = New-Object System.Drawing.SolidBrush($bgColor)
-                $fg.FillRectangle($bgBrush, 0, 0, $vTotalW, $vTotalH)
+                $fg.FillRectangle($bgBrush, 0, 0, [int]$vTotalW, [int]$vTotalH)
                 $bgBrush.Dispose()
 
                 $drawImgX = [int](($vTotalW - $scaledW) / 2) + $offX
@@ -500,16 +501,16 @@ function Sync-ProfileWallpapers {
 
                 for ($m = 0; $m -lt $activeMons.Count; $m++) {
                     $mon = $activeMons[$m]
-                    $tW = $mon.Right - $mon.Left
-                    $tH = $mon.Bottom - $mon.Top
-                    $monVirtX = ($mon.Left - $minX) + $cumGaps[$m]
-                    $monVirtY = ($mon.Top - $minY)
+                    $tW = [int]($mon.Right - $mon.Left)
+                    $tH = [int]($mon.Bottom - $mon.Top)
+                    $monVirtX = [int](($mon.Left - $minX) + $cumGaps[$m])
+                    $monVirtY = [int]($mon.Top - $minY)
                     $cleanProf = ($ProfileItem.Name -replace '[^a-zA-Z0-9_\-]', '_')
                     $hashKey = "${scaleP}_${offX}_${offY}_${totalGap}_${m}"
                     $hash = [Math]::Abs($hashKey.GetHashCode())
                     $renderedOut = Join-Path $cacheDir "${cleanProf}_span_mon$($m+1)_${hash}.png"
 
-                    $sliceBmp = New-Object System.Drawing.Bitmap($tW, $tH)
+                    $sliceBmp = New-Object System.Drawing.Bitmap([int]$tW, [int]$tH)
                     $sg = [System.Drawing.Graphics]::FromImage($sliceBmp)
                     $sg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
                     $sg.DrawImage($fullBmp, (New-Object System.Drawing.Rectangle(0, 0, $tW, $tH)), (New-Object System.Drawing.Rectangle($monVirtX, $monVirtY, $tW, $tH)), [System.Drawing.GraphicsUnit]::Pixel)
