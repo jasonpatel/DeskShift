@@ -94,6 +94,41 @@ public static class AudioController
 }
 "@ -ErrorAction SilentlyContinue
 
+# Function to capture active DPI scaling percentages from connected displays
+function Get-CurrentDisplayScales {
+    param([string]$AppRoot)
+    $setDpiExe = Join-Path $AppRoot "bin\SetDpi.exe"
+    $scales = @{}
+    if (Test-Path -LiteralPath $setDpiExe) {
+        for ($i = 1; $i -le 10; $i++) {
+            $val = (& $setDpiExe value $i 2>&1) -join ""
+            if ($val -match '^\d+$') {
+                $scales["$i"] = [int]$val
+            } else {
+                break
+            }
+        }
+    }
+    return $scales
+}
+
+# Function to apply saved DPI scaling percentages to connected displays
+function Sync-ProfileDisplayScales {
+    param($ProfileItem, [string]$AppRoot)
+    if (-not $ProfileItem.DisplayScales) { return }
+    $setDpiExe = Join-Path $AppRoot "bin\SetDpi.exe"
+    if (-not (Test-Path -LiteralPath $setDpiExe)) { return }
+
+    foreach ($prop in $ProfileItem.DisplayScales.PSObject.Properties) {
+        $dispIdx = $prop.Name
+        $scalePct = [int]$prop.Value
+        if ($scalePct -gt 0) {
+            Write-Host "Applying Windows DPI scale: Display $dispIdx -> $scalePct%" -ForegroundColor Cyan
+            & $setDpiExe $scalePct $dispIdx | Out-Null
+        }
+    }
+}
+
 # Function to switch Windows Default Audio Endpoint to match profile
 function Sync-ProfileAudio {
     param($ProfileItem)
@@ -300,6 +335,7 @@ function Invoke-ProfileSwitch {
         $liveCfg = Get-CurrentConfig
         Sync-ProfileDevices -ProfileItem $ProfileItem -LiveConfig $liveCfg
         Sync-ProfileAudio -ProfileItem $ProfileItem
+        Sync-ProfileDisplayScales -ProfileItem $ProfileItem -AppRoot $profilesDir
         Sync-ProfileLaunchApp -ProfileItem $ProfileItem
 
         # If switching away from single screen (e.g. to Dual, TV, Rig), reset single toggle state

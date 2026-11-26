@@ -16,6 +16,24 @@ if (-not $ConfigFile) {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+# Function to capture active DPI scaling percentages from connected displays
+function Get-CurrentDisplayScales {
+    param([string]$AppRoot)
+    $setDpiExe = Join-Path $AppRoot "bin\SetDpi.exe"
+    $scales = [ordered]@{}
+    if (Test-Path -LiteralPath $setDpiExe) {
+        for ($i = 1; $i -le 10; $i++) {
+            $val = (& $setDpiExe value $i 2>&1) -join ""
+            if ($val -match '^\d+$') {
+                $scales["$i"] = [int]$val
+            } else {
+                break
+            }
+        }
+    }
+    return $scales
+}
+
 # Core Audio Policy Client for Instant Audio Detection and Switching
 Add-Type -TypeDefinition @"
 using System;
@@ -1505,7 +1523,29 @@ $btnCaptureLayout.add_Click({
     $proc = Start-Process -FilePath $engineExe -ArgumentList @("display", "capture", "`"$targetProfName`"", "`"$outJsonPath`"") -WorkingDirectory $scriptDir -WindowStyle Hidden -Wait -PassThru
 
     if ($proc.ExitCode -eq 0 -and (Test-Path -LiteralPath $outJsonPath)) {
-        [System.Windows.Forms.MessageBox]::Show("Current display layout successfully captured to '$targetFile'!`n`nMonitors, resolutions, coordinates, and refresh rates are locked in.", "Capture Succeeded", "OK", "Information")
+        # Automatically snapshot live Windows DPI scaling percentages into profile
+        $capturedScales = Get-CurrentDisplayScales -AppRoot $scriptDir
+        $scaleSummaryList = @()
+        if ($capturedScales.Count -gt 0) {
+            $targetProf = $liveCfg.Profiles | Where-Object { $_.Name -eq $targetProfName } | Select-Object -First 1
+            if ($targetProf) {
+                if ($targetProf.PSObject.Properties["DisplayScales"]) {
+                    $targetProf.DisplayScales = [PSCustomObject]$capturedScales
+                } else {
+                    $targetProf | Add-Member -MemberType NoteProperty -Name "DisplayScales" -Value ([PSCustomObject]$capturedScales)
+                }
+                Save-LiveConfig -cfg $liveCfg
+                foreach ($k in $capturedScales.Keys) {
+                    $scaleSummaryList += "Display $k: $($capturedScales[$k])%"
+                }
+            }
+        }
+
+        $scaleMsg = if ($scaleSummaryList.Count -gt 0) {
+            "`n`nWindows DPI Scaling Saved:`n" + ($scaleSummaryList -join ", ")
+        } else { "" }
+
+        [System.Windows.Forms.MessageBox]::Show("Current display layout & Windows scaling successfully captured to '$targetFile'!$scaleMsg`n`nMonitors, resolutions, coordinates, refresh rates, and DPI scaling are locked in.", "Capture Succeeded", "OK", "Information")
     } else {
         [System.Windows.Forms.MessageBox]::Show("Failed to capture display layout (Exit code: $($proc.ExitCode)).", "Capture Failed", "OK", "Error")
     }
@@ -1636,6 +1676,12 @@ $btnNewProfile.add_Click({
             $engineExe = Join-Path $scriptDir "bin\NativeEngine.exe"
             $outJsonPath = Join-Path $configDir "$pName.native.json"
             Start-Process -FilePath $engineExe -ArgumentList @("display", "capture", "`"$pName`"", "`"$outJsonPath`"") -WorkingDirectory $scriptDir -WindowStyle Hidden -Wait | Out-Null
+
+            $capturedScales = Get-CurrentDisplayScales -AppRoot $scriptDir
+            if ($capturedScales.Count -gt 0) {
+                $newProf | Add-Member -MemberType NoteProperty -Name "DisplayScales" -Value ([PSCustomObject]$capturedScales) -Force
+                Save-LiveConfig -cfg $liveCfg
+            }
         }
 
         & $refreshMatrixGrid
