@@ -175,6 +175,24 @@ public static class DesktopWallpaperNative
             var dw = (IDesktopWallpaper)new DesktopWallpaperClass();
             if (position >= 0 && position <= 5) {
                 dw.SetPosition(position);
+                try {
+                    string styleVal = "10";
+                    string tileVal = "0";
+                    switch (position) {
+                        case 0: styleVal = "0"; tileVal = "0"; break; // Center
+                        case 1: styleVal = "0"; tileVal = "1"; break; // Tile
+                        case 2: styleVal = "2"; tileVal = "0"; break; // Stretch
+                        case 3: styleVal = "6"; tileVal = "0"; break; // Fit
+                        case 4: styleVal = "10"; tileVal = "0"; break; // Fill
+                        case 5: styleVal = "22"; tileVal = "0"; break; // Span
+                    }
+                    using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop", true)) {
+                        if (key != null) {
+                            key.SetValue("WallpaperStyle", styleVal);
+                            key.SetValue("TileWallpaper", tileVal);
+                        }
+                    }
+                } catch {}
             }
             return dw.SetWallpaper(string.IsNullOrEmpty(monitorId) ? null : monitorId, wallpaperPath ?? "");
         } catch {
@@ -439,14 +457,18 @@ function Sync-ProfileWallpapers {
                             ($adj.OffsetY -and [int]$adj.OffsetY -ne 0) -or
                             ($adj.FlipH -and [bool]$adj.FlipH) -or
                             ($adj.FlipV -and [bool]$adj.FlipV) -or
-                            ($adj.BgColor -and $adj.BgColor -ne "#000000")
+                            ($adj.BgColor -and $adj.BgColor -ne "#000000" -and $adj.BgColor -ne "#000")
                         ))
 
                         if ($hasTransformation) {
                             $cleanProf = ($ProfileItem.Name -replace '[^a-zA-Z0-9_\-]', '_')
-                            $renderedOut = Join-Path $cacheDir "${cleanProf}_mon${monIdxStr}.png"
+                            # Unique filename per transform parameter to avoid stale cache hits
+                            $hashKey = "$($adj.OffsetX)_$($adj.OffsetY)_$($adj.FlipH)_$($adj.FlipV)_$($adj.BgColor)_$($wCfg.Position)"
+                            $hash = [Math]::Abs($hashKey.GetHashCode())
+                            $renderedOut = Join-Path $cacheDir "${cleanProf}_mon${monIdxStr}_${hash}.png"
                             $appliedImg = New-TransformedWallpaper -SourcePath $imgFile -TargetWidth $targetW -TargetHeight $targetH -SizingMode $wCfg.Position -OffsetX ([int]$adj.OffsetX) -OffsetY ([int]$adj.OffsetY) -FlipH ([bool]$adj.FlipH) -FlipV ([bool]$adj.FlipV) -BgColorHex $adj.BgColor -OutputPath $renderedOut
                             if ($appliedImg) {
+                                # When applying pre-rendered transformed image, use Fill (4) so it fills the monitor exactly without distortion
                                 [DesktopWallpaperNative]::ApplyWallpaper($targetMon.Path, $appliedImg, 4) | Out-Null
                                 continue
                             }

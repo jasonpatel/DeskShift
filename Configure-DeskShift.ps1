@@ -194,6 +194,24 @@ public static class DesktopWallpaperNative
             var dw = (IDesktopWallpaper)new DesktopWallpaperClass();
             if (position >= 0 && position <= 5) {
                 dw.SetPosition(position);
+                try {
+                    string styleVal = "10";
+                    string tileVal = "0";
+                    switch (position) {
+                        case 0: styleVal = "0"; tileVal = "0"; break; // Center
+                        case 1: styleVal = "0"; tileVal = "1"; break; // Tile
+                        case 2: styleVal = "2"; tileVal = "0"; break; // Stretch
+                        case 3: styleVal = "6"; tileVal = "0"; break; // Fit
+                        case 4: styleVal = "10"; tileVal = "0"; break; // Fill
+                        case 5: styleVal = "22"; tileVal = "0"; break; // Span
+                    }
+                    using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop", true)) {
+                        if (key != null) {
+                            key.SetValue("WallpaperStyle", styleVal);
+                            key.SetValue("TileWallpaper", tileVal);
+                        }
+                    }
+                } catch {}
             }
             return dw.SetWallpaper(string.IsNullOrEmpty(monitorId) ? null : monitorId, wallpaperPath ?? "");
         } catch {
@@ -2568,97 +2586,59 @@ $btnAppSelect.add_Click({
 
 # Wallpaper Assignment & Multi-Monitor Layout Preview Handler
 $btnWallpapers.add_Click({
-    if (-not $cmbProfiles.SelectedItem) {
-        [System.Windows.Forms.MessageBox]::Show("Please select a target profile from the dropdown first.", "No Profile Selected", "OK", "Warning")
-        return
-    }
-
-    $selItem = $cmbProfiles.SelectedItem
-    $targetProfName = if ($selItem.Name) { $selItem.Name } else { $selItem.ToString() }
     $liveCfg = Get-LiveConfig
-    $profObj = $liveCfg.Profiles | Where-Object { $_.Name -eq $targetProfName } | Select-Object -First 1
-    if (-not $profObj) { return }
-
-    # Query monitors: First attempt to load exact layout from Profile's captured native.json.
-    # If not present or empty, fallback to currently active desktop monitors.
-    $profileNativeJson = Join-Path $configDir "$targetProfName.native.json"
-    $mons = [System.Collections.ArrayList]::new()
-
-    if (Test-Path -LiteralPath $profileNativeJson) {
-        try {
-            $parsedJson = Get-Content -LiteralPath $profileNativeJson -Raw -Encoding UTF8 | ConvertFrom-Json
-            if ($parsedJson.Monitors -and $parsedJson.Monitors.Count -gt 0) {
-                # Sort monitors left-to-right (by PositionX, then PositionY)
-                $sortedMonList = $parsedJson.Monitors | Sort-Object PositionX, PositionY
-                $idx = 0
-                foreach ($m in $sortedMonList) {
-                    $mons.Add([PSCustomObject]@{
-                        Index            = $idx
-                        Name             = $m.Name
-                        Left             = [int]$m.PositionX
-                        Top              = [int]$m.PositionY
-                        Right            = [int]($m.PositionX + $m.Width)
-                        Bottom           = [int]($m.PositionY + $m.Height)
-                        Width            = [int]$m.Width
-                        Height           = [int]$m.Height
-                        Path             = ""
-                        CurrentWallpaper = ""
-                    }) | Out-Null
-                    $idx++
-                }
-            }
-        } catch {}
-    }
-
-    # Fallback to active desktop monitors if no native.json available
-    if ($mons.Count -eq 0) {
-        $activeMons = [DesktopWallpaperNative]::GetActiveMonitors()
-        if ($activeMons -and $activeMons.Count -gt 0) {
-            foreach ($am in $activeMons) {
-                $mons.Add([PSCustomObject]@{
-                    Index            = $am.Index
-                    Name             = "Display"
-                    Left             = $am.Left
-                    Top              = $am.Top
-                    Right            = $am.Right
-                    Bottom           = $am.Bottom
-                    Width            = ($am.Right - $am.Left)
-                    Height           = ($am.Bottom - $am.Top)
-                    Path             = $am.Path
-                    CurrentWallpaper = $am.CurrentWallpaper
-                }) | Out-Null
-            }
-        }
-    }
-
-    if ($mons.Count -eq 0) {
-        [System.Windows.Forms.MessageBox]::Show("Could not resolve monitor layout for profile '$targetProfName'. Please snapshot layout first or ensure displays are connected.", "Monitor Query Error", "OK", "Warning")
+    if (-not $liveCfg -or -not $liveCfg.Profiles -or $liveCfg.Profiles.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show("No profiles found to configure.", "No Profiles", "OK", "Warning")
         return
+    }
+
+    $initialProfName = if ($cmbProfiles.SelectedItem) {
+        if ($cmbProfiles.SelectedItem.Name) { $cmbProfiles.SelectedItem.Name } else { $cmbProfiles.SelectedItem.ToString() }
+    } else {
+        $liveCfg.Profiles[0].Name
     }
 
     $dlgWall = New-Object System.Windows.Forms.Form
-    $dlgWall.Text = "Desktop Wallpapers, Positioning & Adjustments - $targetProfName"
-    $dlgWall.Size = New-Object System.Drawing.Size(920, 780)
+    $dlgWall.Text = "Desktop Wallpapers, Positioning & Adjustments - $initialProfName"
+    $dlgWall.Size = New-Object System.Drawing.Size(920, 810)
     $dlgWall.StartPosition = "CenterParent"
     $dlgWall.FormBorderStyle = "FixedDialog"
     $dlgWall.MaximizeBox = $false
     $dlgWall.MinimizeBox = $false
     $dlgWall.BackColor = [System.Drawing.Color]::FromArgb(245, 246, 248)
 
-    # Top Checkbox: Allow DeskShift to manage desktop wallpapers for this profile
+    # Top Profile Selection Bar: Allows switching between profiles directly inside dialog
+    $lblDlgProf = New-Object System.Windows.Forms.Label
+    $lblDlgProf.Text = "Wallpaper Profile:"
+    $lblDlgProf.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.5, [System.Drawing.FontStyle]::Bold)
+    $lblDlgProf.Location = New-Object System.Drawing.Point(20, 16)
+    $lblDlgProf.Size = New-Object System.Drawing.Size(120, 24)
+    $dlgWall.Controls.Add($lblDlgProf)
+
+    $cmbDlgProfiles = New-Object System.Windows.Forms.ComboBox
+    $cmbDlgProfiles.DropDownStyle = "DropDownList"
+    $cmbDlgProfiles.Font = New-Object System.Drawing.Font("Segoe UI", 9.5)
+    $cmbDlgProfiles.Location = New-Object System.Drawing.Point(145, 14)
+    $cmbDlgProfiles.Size = New-Object System.Drawing.Size(260, 26)
+    foreach ($p in $liveCfg.Profiles) {
+        $cmbDlgProfiles.Items.Add($p.Name) | Out-Null
+    }
+    $initIdx = $cmbDlgProfiles.Items.IndexOf($initialProfName)
+    $cmbDlgProfiles.SelectedIndex = if ($initIdx -ge 0) { $initIdx } else { 0 }
+    $dlgWall.Controls.Add($cmbDlgProfiles)
+
+    # Checkbox: Allow DeskShift to manage desktop wallpapers for this profile
     $chkEnableWall = New-Object System.Windows.Forms.CheckBox
-    $chkEnableWall.Text = "Allow DeskShift to manage Desktop Wallpapers for this profile (Optional)"
-    $chkEnableWall.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 10.0, [System.Drawing.FontStyle]::Bold)
-    $chkEnableWall.Location = New-Object System.Drawing.Point(20, 15)
-    $chkEnableWall.Size = New-Object System.Drawing.Size(600, 26)
-    $isWallEnabled = if ($profObj.Wallpapers -and ($null -ne $profObj.Wallpapers.Enabled)) { [bool]$profObj.Wallpapers.Enabled } else { $false }
-    $chkEnableWall.Checked = $isWallEnabled
+    $chkEnableWall.Text = "Allow DeskShift to manage Desktop Wallpapers for this profile"
+    $chkEnableWall.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.5, [System.Drawing.FontStyle]::Bold)
+    $chkEnableWall.Location = New-Object System.Drawing.Point(425, 15)
+    $chkEnableWall.Size = New-Object System.Drawing.Size(460, 24)
     $dlgWall.Controls.Add($chkEnableWall)
 
     # Visual Preview Box (DisplayFusion-style)
     $grpPreview = New-Object System.Windows.Forms.GroupBox
     $grpPreview.Text = "Wallpaper Preview & Monitor Layout (True Aspect Ratio)"
-    $grpPreview.Location = New-Object System.Drawing.Point(20, 48)
+    $grpPreview.Location = New-Object System.Drawing.Point(20, 50)
     $grpPreview.Size = New-Object System.Drawing.Size(865, 200)
     $grpPreview.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.0, [System.Drawing.FontStyle]::Bold)
     $dlgWall.Controls.Add($grpPreview)
@@ -2671,8 +2651,8 @@ $btnWallpapers.add_Click({
 
     # Main Settings Tabs (Source & Mode, Adjustments & Colors)
     $wallTabControl = New-Object System.Windows.Forms.TabControl
-    $wallTabControl.Location = New-Object System.Drawing.Point(20, 255)
-    $wallTabControl.Size = New-Object System.Drawing.Size(865, 415)
+    $wallTabControl.Location = New-Object System.Drawing.Point(20, 258)
+    $wallTabControl.Size = New-Object System.Drawing.Size(865, 420)
     $dlgWall.Controls.Add($wallTabControl)
 
     # TAB 1: Source & Sizing
@@ -2699,17 +2679,6 @@ $btnWallpapers.add_Click({
         "Tile (Repeat Across Screen)",
         "Span (Span Across All Monitors)"
     ))
-
-    $curPos = if ($profObj.Wallpapers -and $profObj.Wallpapers.Position) { $profObj.Wallpapers.Position } else { "Fill" }
-    switch ($curPos) {
-        "Fill" { $cmbSizing.SelectedIndex = 0 }
-        "Fit" { $cmbSizing.SelectedIndex = 1 }
-        "Stretch" { $cmbSizing.SelectedIndex = 2 }
-        "Center" { $cmbSizing.SelectedIndex = 3 }
-        "Tile" { $cmbSizing.SelectedIndex = 4 }
-        "Span" { $cmbSizing.SelectedIndex = 5 }
-        default { $cmbSizing.SelectedIndex = 0 }
-    }
     $tabSource.Controls.Add($cmbSizing)
 
     # Monitor Selector
@@ -2725,50 +2694,7 @@ $btnWallpapers.add_Click({
     $cmbMonitorPick.Location = New-Object System.Drawing.Point(20, 102)
     $cmbMonitorPick.Size = New-Object System.Drawing.Size(360, 25)
     $cmbMonitorPick.Font = New-Object System.Drawing.Font("Segoe UI", 9.0)
-    for ($m = 0; $m -lt $mons.Count; $m++) {
-        $mon = $mons[$m]
-        $cmbMonitorPick.Items.Add("Monitor $($m + 1): $($mon.Name) ($($mon.Width)x$($mon.Height)) at ($($mon.Left), $($mon.Top))") | Out-Null
-    }
-    if ($cmbMonitorPick.Items.Count -gt 0) { $cmbMonitorPick.SelectedIndex = 0 }
     $tabSource.Controls.Add($cmbMonitorPick)
-
-    # Local state for wallpaper image assignments: [int] -> [string]
-    $wallState = [ordered]@{}
-    if ($profObj.Wallpapers -and $profObj.Wallpapers.Monitors) {
-        foreach ($prop in $profObj.Wallpapers.Monitors.PSObject.Properties) {
-            $wallState[$prop.Name] = $prop.Value
-        }
-    }
-    $spanImageState = if ($profObj.Wallpapers -and $profObj.Wallpapers.SpanImage) { $profObj.Wallpapers.SpanImage } else { "" }
-
-    # Adjustments state: [string] -> hashtable of @{ OffsetX, OffsetY, FlipH, FlipV, BgColor }
-    $adjState = [ordered]@{}
-    if ($profObj.Wallpapers -and $profObj.Wallpapers.Adjustments) {
-        foreach ($prop in $profObj.Wallpapers.Adjustments.PSObject.Properties) {
-            $val = $prop.Value
-            $adjState[$prop.Name] = [ordered]@{
-                OffsetX = if ($val.PSObject.Properties["OffsetX"]) { [int]$val.OffsetX } else { 0 }
-                OffsetY = if ($val.PSObject.Properties["OffsetY"]) { [int]$val.OffsetY } else { 0 }
-                FlipH   = if ($val.PSObject.Properties["FlipH"]) { [bool]$val.FlipH } else { $false }
-                FlipV   = if ($val.PSObject.Properties["FlipV"]) { [bool]$val.FlipV } else { $false }
-                BgColor = if ($val.PSObject.Properties["BgColor"]) { $val.BgColor } else { "#000000" }
-            }
-        }
-    }
-
-    # Ensure all monitors have adjustment entries
-    for ($m = 1; $m -le $mons.Count; $m++) {
-        $k = "$m"
-        if (-not $adjState.Contains($k)) {
-            $adjState[$k] = [ordered]@{
-                OffsetX = 0
-                OffsetY = 0
-                FlipH   = $false
-                FlipV   = $false
-                BgColor = "#000000"
-            }
-        }
-    }
 
     # Image path box and browse
     $lblImgPath = New-Object System.Windows.Forms.Label
@@ -2919,64 +2845,207 @@ $btnWallpapers.add_Click({
     $btnPickColor.FlatStyle = "Flat"
     $tabAdjust.Controls.Add($btnPickColor)
 
-    $btnPickColor.add_Click({
-        $cd = New-Object System.Windows.Forms.ColorDialog
-        if ($cd.ShowDialog($dlgWall) -eq [System.Windows.Forms.DialogResult]::OK) {
-            $hex = "#{0:X2}{1:X2}{2:X2}" -f $cd.Color.R, $cd.Color.G, $cd.Color.B
-            $txtBgColorHex.Text = $hex
-            $pnlColorPreview.BackColor = $cd.Color
-            $key = & $getCurMonKey
-            $adjState[$key].BgColor = $hex
-            $pnlCanvas.Invalidate()
-        }
-    })
-
-    $txtBgColorHex.add_TextChanged({
-        try {
-            $c = [System.Drawing.ColorTranslator]::FromHtml($txtBgColorHex.Text.Trim())
-            $pnlColorPreview.BackColor = $c
-            $key = & $getCurMonKey
-            $adjState[$key].BgColor = $txtBgColorHex.Text.Trim()
-            $pnlCanvas.Invalidate()
-        } catch {}
-    })
-
-    $numOffX.add_ValueChanged({
-        $key = & $getCurMonKey
-        $adjState[$key].OffsetX = [int]$numOffX.Value
-        $pnlCanvas.Invalidate()
-    })
-
-    $numOffY.add_ValueChanged({
-        $key = & $getCurMonKey
-        $adjState[$key].OffsetY = [int]$numOffY.Value
-        $pnlCanvas.Invalidate()
-    })
-
-    $chkFlipH.add_CheckedChanged({
-        $key = & $getCurMonKey
-        $adjState[$key].FlipH = [bool]$chkFlipH.Checked
-        $pnlCanvas.Invalidate()
-    })
-
-    $chkFlipV.add_CheckedChanged({
-        $key = & $getCurMonKey
-        $adjState[$key].FlipV = [bool]$chkFlipV.Checked
-        $pnlCanvas.Invalidate()
-    })
-
     $wallTabControl.TabPages.Add($tabAdjust)
 
-    # Current monitor index helper
+    # Dynamic Profile State Container
+    $curProfName = ""
+    $mons = [System.Collections.ArrayList]::new()
+    $wallState = [ordered]@{}
+    $adjState = [ordered]@{}
+    $spanImageState = ""
+    $isLoadingProfile = $false
+
+    $posKeyMap = @{
+        0 = "Fill"
+        1 = "Fit"
+        2 = "Stretch"
+        3 = "Center"
+        4 = "Tile"
+        5 = "Span"
+    }
+
     $getCurMonKey = {
         return "$($cmbMonitorPick.SelectedIndex + 1)"
     }
 
+    # Save active profile's UI controls into in-memory state
+    $saveCurrentProfileToState = {
+        if (-not $curProfName) { return }
+        $prof = $liveCfg.Profiles | Where-Object { $_.Name -eq $curProfName } | Select-Object -First 1
+        if (-not $prof) { return }
+
+        $curKey = & $getCurMonKey
+        if ($cmbSizing.SelectedIndex -eq 5) {
+            $script:spanImageState = $txtImgPath.Text.Trim()
+        } else {
+            $wallState[$curKey] = $txtImgPath.Text.Trim()
+        }
+
+        if ($adjState.Contains($curKey)) {
+            $adjState[$curKey].OffsetX = [int]$numOffX.Value
+            $adjState[$curKey].OffsetY = [int]$numOffY.Value
+            $adjState[$curKey].FlipH = [bool]$chkFlipH.Checked
+            $adjState[$curKey].FlipV = [bool]$chkFlipV.Checked
+            $adjState[$curKey].BgColor = $txtBgColorHex.Text.Trim()
+        }
+
+        $cleanMonitors = [ordered]@{}
+        foreach ($k in $wallState.Keys) {
+            $v = $wallState[$k]
+            if ($v -and $v.Trim()) { $cleanMonitors[$k] = $v.Trim() }
+        }
+
+        $cleanAdjustments = [ordered]@{}
+        foreach ($k in $adjState.Keys) {
+            $cleanAdjustments[$k] = $adjState[$k]
+        }
+
+        $posName = $posKeyMap[$cmbSizing.SelectedIndex]
+        $wObj = [PSCustomObject]@{
+            Enabled     = [bool]$chkEnableWall.Checked
+            Position    = $posName
+            Monitors    = $cleanMonitors
+            Adjustments = $cleanAdjustments
+            SpanImage   = $script:spanImageState
+        }
+
+        if ($prof.PSObject.Properties["Wallpapers"]) {
+            $prof.Wallpapers = $wObj
+        } else {
+            $prof | Add-Member -MemberType NoteProperty -Name "Wallpapers" -Value $wObj
+        }
+    }
+
+    # Load target profile data into dialog controls
+    $loadProfile = {
+        param([string]$targetProf)
+        $script:isLoadingProfile = $true
+        $script:curProfName = $targetProf
+        $dlgWall.Text = "Desktop Wallpapers, Positioning & Adjustments - $targetProf"
+
+        $profObj = $liveCfg.Profiles | Where-Object { $_.Name -eq $targetProf } | Select-Object -First 1
+        if (-not $profObj) {
+            $script:isLoadingProfile = $false
+            return
+        }
+
+        # Query monitors: From native.json or fallback to active monitors
+        $mons.Clear()
+        $profileNativeJson = Join-Path $configDir "$targetProf.native.json"
+        if (Test-Path -LiteralPath $profileNativeJson) {
+            try {
+                $parsedJson = Get-Content -LiteralPath $profileNativeJson -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($parsedJson.Monitors -and $parsedJson.Monitors.Count -gt 0) {
+                    $sortedMonList = $parsedJson.Monitors | Sort-Object PositionX, PositionY
+                    $idx = 0
+                    foreach ($m in $sortedMonList) {
+                        $mons.Add([PSCustomObject]@{
+                            Index            = $idx
+                            Name             = $m.Name
+                            Left             = [int]$m.PositionX
+                            Top              = [int]$m.PositionY
+                            Right            = [int]($m.PositionX + $m.Width)
+                            Bottom           = [int]($m.PositionY + $m.Height)
+                            Width            = [int]$m.Width
+                            Height           = [int]$m.Height
+                            Path             = ""
+                            CurrentWallpaper = ""
+                        }) | Out-Null
+                        $idx++
+                    }
+                }
+            } catch {}
+        }
+
+        if ($mons.Count -eq 0) {
+            $activeMons = [DesktopWallpaperNative]::GetActiveMonitors()
+            if ($activeMons -and $activeMons.Count -gt 0) {
+                foreach ($am in $activeMons) {
+                    $mons.Add([PSCustomObject]@{
+                        Index            = $am.Index
+                        Name             = "Display"
+                        Left             = $am.Left
+                        Top              = $am.Top
+                        Right            = $am.Right
+                        Bottom           = $am.Bottom
+                        Width            = ($am.Right - $am.Left)
+                        Height           = ($am.Bottom - $am.Top)
+                        Path             = $am.Path
+                        CurrentWallpaper = $am.CurrentWallpaper
+                    }) | Out-Null
+                }
+            }
+        }
+
+        # Populate Enabled checkbox
+        $chkEnableWall.Checked = if ($profObj.Wallpapers -and ($null -ne $profObj.Wallpapers.Enabled)) { [bool]$profObj.Wallpapers.Enabled } else { $false }
+
+        # Populate Sizing dropdown
+        $curPos = if ($profObj.Wallpapers -and $profObj.Wallpapers.Position) { $profObj.Wallpapers.Position } else { "Fill" }
+        switch ($curPos) {
+            "Fill" { $cmbSizing.SelectedIndex = 0 }
+            "Fit" { $cmbSizing.SelectedIndex = 1 }
+            "Stretch" { $cmbSizing.SelectedIndex = 2 }
+            "Center" { $cmbSizing.SelectedIndex = 3 }
+            "Tile" { $cmbSizing.SelectedIndex = 4 }
+            "Span" { $cmbSizing.SelectedIndex = 5 }
+            default { $cmbSizing.SelectedIndex = 0 }
+        }
+
+        # Populate Monitor picker
+        $cmbMonitorPick.Items.Clear()
+        for ($m = 0; $m -lt $mons.Count; $m++) {
+            $mon = $mons[$m]
+            $cmbMonitorPick.Items.Add("Monitor $($m + 1): $($mon.Name) ($($mon.Width)x$($mon.Height)) at ($($mon.Left), $($mon.Top))") | Out-Null
+        }
+        if ($cmbMonitorPick.Items.Count -gt 0) { $cmbMonitorPick.SelectedIndex = 0 }
+
+        # Populate wallState and spanImageState
+        $wallState.Clear()
+        if ($profObj.Wallpapers -and $profObj.Wallpapers.Monitors) {
+            foreach ($prop in $profObj.Wallpapers.Monitors.PSObject.Properties) {
+                $wallState[$prop.Name] = $prop.Value
+            }
+        }
+        $script:spanImageState = if ($profObj.Wallpapers -and $profObj.Wallpapers.SpanImage) { $profObj.Wallpapers.SpanImage } else { "" }
+
+        # Populate adjState
+        $adjState.Clear()
+        if ($profObj.Wallpapers -and $profObj.Wallpapers.Adjustments) {
+            foreach ($prop in $profObj.Wallpapers.Adjustments.PSObject.Properties) {
+                $val = $prop.Value
+                $adjState[$prop.Name] = [ordered]@{
+                    OffsetX = if ($val.PSObject.Properties["OffsetX"]) { [int]$val.OffsetX } else { 0 }
+                    OffsetY = if ($val.PSObject.Properties["OffsetY"]) { [int]$val.OffsetY } else { 0 }
+                    FlipH   = if ($val.PSObject.Properties["FlipH"]) { [bool]$val.FlipH } else { $false }
+                    FlipV   = if ($val.PSObject.Properties["FlipV"]) { [bool]$val.FlipV } else { $false }
+                    BgColor = if ($val.PSObject.Properties["BgColor"]) { $val.BgColor } else { "#000000" }
+                }
+            }
+        }
+        for ($m = 1; $m -le $mons.Count; $m++) {
+            $k = "$m"
+            if (-not $adjState.Contains($k)) {
+                $adjState[$k] = [ordered]@{
+                    OffsetX = 0
+                    OffsetY = 0
+                    FlipH   = $false
+                    FlipV   = $false
+                    BgColor = "#000000"
+                }
+            }
+        }
+
+        $script:isLoadingProfile = $false
+        & $updateSelectedMonitorField
+    }
+
     $updateSelectedMonitorField = {
+        if ($script:isLoadingProfile) { return }
         $key = & $getCurMonKey
         if ($cmbSizing.SelectedIndex -eq 5) { # Span
             $lblImgPath.Text = "Span Wallpaper Image Source (Across all monitors):"
-            $txtImgPath.Text = $spanImageState
+            $txtImgPath.Text = $script:spanImageState
             $cmbMonitorPick.Enabled = $false
         } else {
             $lblImgPath.Text = "Wallpaper Image Source for Monitor ${key}:"
@@ -2993,7 +3062,6 @@ $btnWallpapers.add_Click({
             }
         }
 
-        # Load adjustment values for this monitor
         if ($adjState.Contains($key)) {
             $adj = $adjState[$key]
             $numOffX.Value = [int]$adj.OffsetX
@@ -3006,6 +3074,78 @@ $btnWallpapers.add_Click({
         $pnlCanvas.Invalidate()
     }
 
+    # Profile combo box change handler
+    $cmbDlgProfiles.add_SelectedIndexChanged({
+        if ($script:isLoadingProfile) { return }
+        & $saveCurrentProfileToState
+        $newProf = $cmbDlgProfiles.SelectedItem.ToString()
+        & $loadProfile $newProf
+    })
+
+    # Color picker events
+    $btnPickColor.add_Click({
+        $cd = New-Object System.Windows.Forms.ColorDialog
+        if ($cd.ShowDialog($dlgWall) -eq [System.Windows.Forms.DialogResult]::OK) {
+            $hex = "#{0:X2}{1:X2}{2:X2}" -f $cd.Color.R, $cd.Color.G, $cd.Color.B
+            $txtBgColorHex.Text = $hex
+            $pnlColorPreview.BackColor = $cd.Color
+            $key = & $getCurMonKey
+            if ($adjState.Contains($key)) {
+                $adjState[$key].BgColor = $hex
+            }
+            $pnlCanvas.Invalidate()
+        }
+    })
+
+    $txtBgColorHex.add_TextChanged({
+        if ($script:isLoadingProfile) { return }
+        try {
+            $c = [System.Drawing.ColorTranslator]::FromHtml($txtBgColorHex.Text.Trim())
+            $pnlColorPreview.BackColor = $c
+            $key = & $getCurMonKey
+            if ($adjState.Contains($key)) {
+                $adjState[$key].BgColor = $txtBgColorHex.Text.Trim()
+            }
+            $pnlCanvas.Invalidate()
+        } catch {}
+    })
+
+    $numOffX.add_ValueChanged({
+        if ($script:isLoadingProfile) { return }
+        $key = & $getCurMonKey
+        if ($adjState.Contains($key)) {
+            $adjState[$key].OffsetX = [int]$numOffX.Value
+        }
+        $pnlCanvas.Invalidate()
+    })
+
+    $numOffY.add_ValueChanged({
+        if ($script:isLoadingProfile) { return }
+        $key = & $getCurMonKey
+        if ($adjState.Contains($key)) {
+            $adjState[$key].OffsetY = [int]$numOffY.Value
+        }
+        $pnlCanvas.Invalidate()
+    })
+
+    $chkFlipH.add_CheckedChanged({
+        if ($script:isLoadingProfile) { return }
+        $key = & $getCurMonKey
+        if ($adjState.Contains($key)) {
+            $adjState[$key].FlipH = [bool]$chkFlipH.Checked
+        }
+        $pnlCanvas.Invalidate()
+    })
+
+    $chkFlipV.add_CheckedChanged({
+        if ($script:isLoadingProfile) { return }
+        $key = & $getCurMonKey
+        if ($adjState.Contains($key)) {
+            $adjState[$key].FlipV = [bool]$chkFlipV.Checked
+        }
+        $pnlCanvas.Invalidate()
+    })
+
     $cmbMonitorPick.add_SelectedIndexChanged({
         & $updateSelectedMonitorField
     })
@@ -3015,6 +3155,7 @@ $btnWallpapers.add_Click({
     })
 
     $txtImgPath.add_TextChanged({
+        if ($script:isLoadingProfile) { return }
         $key = & $getCurMonKey
         if ($cmbSizing.SelectedIndex -eq 5) {
             $script:spanImageState = $txtImgPath.Text.Trim()
@@ -3055,7 +3196,6 @@ $btnWallpapers.add_Click({
 
         if ($mons.Count -eq 0) { return }
 
-        # Calculate bounding rectangle encompassing all monitors
         $minX = [int]::MaxValue; $minY = [int]::MaxValue
         $maxX = [int]::MinValue; $maxY = [int]::MinValue
 
@@ -3071,7 +3211,6 @@ $btnWallpapers.add_Click({
 
         $availW = $pnlCanvas.Width - 40
         $availH = $pnlCanvas.Height - 30
-        # True Aspect Ratio Scale factor: identical scale for X and Y!
         $scale = [Math]::Min($availW / $totalW, $availH / $totalH)
 
         $drawOffsetX = 20 + [int](($availW - ($totalW * $scale)) / 2)
@@ -3088,25 +3227,22 @@ $btnWallpapers.add_Click({
 
             $rect = New-Object System.Drawing.Rectangle($rx, $ry, $rw, $rh)
 
-            # Determine image for this monitor
             $key = "$($i + 1)"
             $path = ""
             if ($cmbSizing.SelectedIndex -eq 5) {
-                $path = $spanImageState
+                $path = $script:spanImageState
             } elseif ($wallState.Contains($key) -and $wallState[$key]) {
                 $path = $wallState[$key]
             } elseif ($mon.CurrentWallpaper) {
                 $path = $mon.CurrentWallpaper
             }
 
-            # Adjustments for this monitor
             $adj = if ($adjState.Contains($key)) { $adjState[$key] } else { $null }
             $bgColor = [System.Drawing.Color]::FromArgb(30, 41, 59)
             if ($adj -and $adj.BgColor) {
                 try { $bgColor = [System.Drawing.ColorTranslator]::FromHtml($adj.BgColor) } catch {}
             }
 
-            # Fill monitor background
             $bgBrush = New-Object System.Drawing.SolidBrush($bgColor)
             $g.FillRectangle($bgBrush, $rect)
             $bgBrush.Dispose()
@@ -3118,7 +3254,6 @@ $btnWallpapers.add_Click({
                     $imgToDraw = New-Object System.Drawing.Bitmap($rawImg)
                     $rawImg.Dispose()
 
-                    # Apply live flip if set
                     if ($adj) {
                         if ($adj.FlipH -and $adj.FlipV) {
                             $imgToDraw.RotateFlip([System.Drawing.RotateFlipType]::RotateNoneFlipXY)
@@ -3132,11 +3267,9 @@ $btnWallpapers.add_Click({
             }
 
             if ($imgToDraw) {
-                # Save graphics state and clip to this monitor rectangle
                 $prevClip = $g.Clip
                 $g.SetClip($rect)
 
-                # Scaled pixel offsets (scaled proportionally to monitor preview)
                 $monW = $mon.Right - $mon.Left
                 $monH = $mon.Bottom - $mon.Top
                 $pxScaleX = if ($monW -gt 0) { $rw / $monW } else { $scale }
@@ -3145,12 +3278,11 @@ $btnWallpapers.add_Click({
                 $offX = if ($adj) { [int]($adj.OffsetX * $pxScaleX) } else { 0 }
                 $offY = if ($adj) { [int]($adj.OffsetY * $pxScaleY) } else { 0 }
 
-                $sizing = $cmbSizing.SelectedItem.ToString()
+                $sizing = if ($cmbSizing.SelectedItem) { $cmbSizing.SelectedItem.ToString() } else { "Fill" }
                 $iw = $imgToDraw.Width
                 $ih = $imgToDraw.Height
 
                 if ($sizing -like "*Fit Best*") {
-                    # Fit: letterbox
                     $imgScale = [Math]::Min($rw / $iw, $rh / $ih)
                     $dw = [int]($iw * $imgScale)
                     $dh = [int]($ih * $imgScale)
@@ -3179,7 +3311,6 @@ $btnWallpapers.add_Click({
                 $imgToDraw.Dispose()
             }
 
-            # Border: Highlight currently selected monitor with bold red border
             $isSelected = ($i -eq $curIdx)
             $borderPen = if ($isSelected) {
                 New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(239, 68, 68), 3)
@@ -3189,7 +3320,6 @@ $btnWallpapers.add_Click({
             $g.DrawRectangle($borderPen, $rect)
             $borderPen.Dispose()
 
-            # Monitor number badge in upper-left corner
             $badgeRect = New-Object System.Drawing.Rectangle($rx + 4, $ry + 4, 24, 22)
             $badgeBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(180, 0, 0, 0))
             $g.FillRectangle($badgeBrush, $badgeRect)
@@ -3202,7 +3332,6 @@ $btnWallpapers.add_Click({
             $sf.LineAlignment = [System.Drawing.StringAlignment]::Center
             $g.DrawString("$($i + 1)", $badgeFont, $textBrush, $badgeRect, $sf)
 
-            # Resolution badge at bottom
             $resText = "$($mon.Width)x$($mon.Height)"
             $resFont = New-Object System.Drawing.Font("Segoe UI", 7.5)
             $resSize = $g.MeasureString($resText, $resFont)
@@ -3219,7 +3348,7 @@ $btnWallpapers.add_Click({
     # Allow clicking on a monitor box in the canvas to select it
     $pnlCanvas.add_MouseDown({
         param($sender, $e)
-        if ($cmbSizing.SelectedIndex -eq 5) { return } # Span mode
+        if ($cmbSizing.SelectedIndex -eq 5) { return }
 
         $minX = [int]::MaxValue; $minY = [int]::MaxValue
         $maxX = [int]::MinValue; $maxY = [int]::MinValue
@@ -3256,21 +3385,12 @@ $btnWallpapers.add_Click({
     $btnPreviewNow = New-Object System.Windows.Forms.Button
     $btnPreviewNow.Text = "Preview Now On Displays"
     $btnPreviewNow.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.0, [System.Drawing.FontStyle]::Bold)
-    $btnPreviewNow.Location = New-Object System.Drawing.Point(20, 685)
-    $btnPreviewNow.Size = New-Object System.Drawing.Size(185, 34)
+    $btnPreviewNow.Location = New-Object System.Drawing.Point(20, 715)
+    $btnPreviewNow.Size = New-Object System.Drawing.Size(195, 34)
     $btnPreviewNow.BackColor = [System.Drawing.Color]::FromArgb(59, 130, 246)
     $btnPreviewNow.ForeColor = [System.Drawing.Color]::White
     $btnPreviewNow.FlatStyle = "Flat"
     $dlgWall.Controls.Add($btnPreviewNow)
-
-    $posKeyMap = @{
-        0 = "Fill"
-        1 = "Fit"
-        2 = "Stretch"
-        3 = "Center"
-        4 = "Tile"
-        5 = "Span"
-    }
 
     $btnPreviewNow.add_Click({
         $posCode = $cmbSizing.SelectedIndex
@@ -3280,8 +3400,22 @@ $btnWallpapers.add_Click({
             return
         }
 
+        # Force sync of current monitor controls to local state before rendering
+        $curKey = & $getCurMonKey
+        if ($cmbSizing.SelectedIndex -eq 5) {
+            $script:spanImageState = $txtImgPath.Text.Trim()
+        } else {
+            $wallState[$curKey] = $txtImgPath.Text.Trim()
+        }
+        if ($adjState.Contains($curKey)) {
+            $adjState[$curKey].OffsetX = [int]$numOffX.Value
+            $adjState[$curKey].OffsetY = [int]$numOffY.Value
+            $adjState[$curKey].FlipH = [bool]$chkFlipH.Checked
+            $adjState[$curKey].FlipV = [bool]$chkFlipV.Checked
+            $adjState[$curKey].BgColor = $txtBgColorHex.Text.Trim()
+        }
+
         if ($posCode -eq 5) {
-            # Span
             $spanImg = $txtImgPath.Text.Trim()
             if ($spanImg -and (Test-Path -LiteralPath $spanImg)) {
                 [DesktopWallpaperNative]::ApplyWallpaper($null, $spanImg, 5) | Out-Null
@@ -3304,11 +3438,14 @@ $btnWallpapers.add_Click({
                         ($adj.OffsetY -and [int]$adj.OffsetY -ne 0) -or
                         ($adj.FlipH -and [bool]$adj.FlipH) -or
                         ($adj.FlipV -and [bool]$adj.FlipV) -or
-                        ($adj.BgColor -and $adj.BgColor -ne "#000000")
+                        ($adj.BgColor -and $adj.BgColor -ne "#000000" -and $adj.BgColor -ne "#000")
                     ))
 
                     if ($hasTransformation) {
-                        $renderedOut = Join-Path $cacheDir "preview_mon${k}.png"
+                        $hashKey = "$($adj.OffsetX)_$($adj.OffsetY)_$($adj.FlipH)_$($adj.FlipV)_$($adj.BgColor)_$($posKeyMap[$posCode])"
+                        $hash = [Math]::Abs($hashKey.GetHashCode())
+                        $cleanProf = ($script:curProfName -replace '[^a-zA-Z0-9_\-]', '_')
+                        $renderedOut = Join-Path $cacheDir "preview_${cleanProf}_mon${k}_${hash}.png"
                         $appliedImg = New-TransformedWallpaper -SourcePath $img -TargetWidth $targetW -TargetHeight $targetH -SizingMode $posKeyMap[$posCode] -OffsetX ([int]$adj.OffsetX) -OffsetY ([int]$adj.OffsetY) -FlipH ([bool]$adj.FlipH) -FlipV ([bool]$adj.FlipV) -BgColorHex $adj.BgColor -OutputPath $renderedOut
                         if ($appliedImg) {
                             [DesktopWallpaperNative]::ApplyWallpaper($mon.Path, $appliedImg, 4) | Out-Null
@@ -3316,7 +3453,17 @@ $btnWallpapers.add_Click({
                         }
                     }
 
-                    [DesktopWallpaperNative]::ApplyWallpaper($mon.Path, $img, $posCode) | Out-Null
+                    # Map Fill (posCode 0) -> Windows DESKTOP_WALLPAPER_POSITION::Fill (4)
+                    $winPos = switch ($posCode) {
+                        0 { 4 } # Fill
+                        1 { 3 } # Fit
+                        2 { 2 } # Stretch
+                        3 { 0 } # Center
+                        4 { 1 } # Tile
+                        5 { 5 } # Span
+                        default { 4 }
+                    }
+                    [DesktopWallpaperNative]::ApplyWallpaper($mon.Path, $img, $winPos) | Out-Null
                 }
             }
         }
@@ -3326,8 +3473,8 @@ $btnWallpapers.add_Click({
     $btnSaveWall = New-Object System.Windows.Forms.Button
     $btnSaveWall.Text = "Save Wallpaper Settings"
     $btnSaveWall.DialogResult = [System.Windows.Forms.DialogResult]::OK
-    $btnSaveWall.Location = New-Object System.Drawing.Point(585, 685)
-    $btnSaveWall.Size = New-Object System.Drawing.Size(180, 34)
+    $btnSaveWall.Location = New-Object System.Drawing.Point(575, 715)
+    $btnSaveWall.Size = New-Object System.Drawing.Size(190, 34)
     $btnSaveWall.BackColor = [System.Drawing.Color]::FromArgb(225, 29, 72)
     $btnSaveWall.ForeColor = [System.Drawing.Color]::White
     $btnSaveWall.FlatStyle = "Flat"
@@ -3336,51 +3483,25 @@ $btnWallpapers.add_Click({
     $btnCancelWall = New-Object System.Windows.Forms.Button
     $btnCancelWall.Text = "Cancel"
     $btnCancelWall.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-    $btnCancelWall.Location = New-Object System.Drawing.Point(785, 685)
+    $btnCancelWall.Location = New-Object System.Drawing.Point(785, 715)
     $btnCancelWall.Size = New-Object System.Drawing.Size(100, 34)
     $dlgWall.Controls.Add($btnCancelWall)
     $dlgWall.AcceptButton = $btnSaveWall
     $dlgWall.CancelButton = $btnCancelWall
 
-    & $updateSelectedMonitorField
+    # Initial load of active profile
+    & $loadProfile $initialProfName
 
     if ($dlgWall.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
-        $enabled = $chkEnableWall.Checked
-        $posName = $posKeyMap[$cmbSizing.SelectedIndex]
-
-        $cleanMonitors = [ordered]@{}
-        foreach ($k in $wallState.Keys) {
-            $cleanVal = $wallState[$k]
-            if ($cleanVal -and $cleanVal.Trim()) {
-                $cleanMonitors[$k] = $cleanVal.Trim()
-            }
-        }
-
-        $cleanAdjustments = [ordered]@{}
-        foreach ($k in $adjState.Keys) {
-            $cleanAdjustments[$k] = $adjState[$k]
-        }
-
-        $wObj = [PSCustomObject]@{
-            Enabled     = $enabled
-            Position    = $posName
-            Monitors    = $cleanMonitors
-            Adjustments = $cleanAdjustments
-            SpanImage   = $spanImageState
-        }
-
-        if ($profObj.PSObject.Properties["Wallpapers"]) {
-            $profObj.Wallpapers = $wObj
-        } else {
-            $profObj | Add-Member -MemberType NoteProperty -Name "Wallpapers" -Value $wObj
-        }
-
+        & $saveCurrentProfileToState
         Save-LiveConfig -cfg $liveCfg
         & $refreshMatrixGrid
-        $statusMsg = if ($enabled) { "Enabled ($posName)" } else { "Disabled" }
-        [System.Windows.Forms.MessageBox]::Show("Wallpaper settings saved for '$targetProfName': $statusMsg", "Settings Saved", "OK", "Information")
+        [System.Windows.Forms.MessageBox]::Show("Wallpaper settings saved successfully for all configured profiles.", "Settings Saved", "OK", "Information")
     }
 })
+
+
+
 
 # Delete Selected Profile Button Handler
 $btnDeleteProfile.add_Click({
