@@ -55,6 +55,7 @@ $nativeEngine = Join-Path $profilesDir "bin\NativeEngine.exe"
 # Initialize native Windows Core Audio Policy Client for instant, silent audio endpoint switching
 Add-Type -TypeDefinition @"
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 [Guid("F8679F50-850A-41CF-9C72-430F290290C8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -87,6 +88,95 @@ public static class AudioController
             client.SetDefaultEndpoint(deviceId, 1); // eMultimedia
             client.SetDefaultEndpoint(deviceId, 2); // eCommunications
             return 0;
+        } catch {
+            return -1;
+        }
+    }
+}
+
+[ComImport, Guid("C2CF3110-460E-4fc1-B9D0-8A1C0C9CC4BD")]
+public class DesktopWallpaperClass {}
+
+[ComImport, Guid("B92B56A9-8B55-4E14-9A89-0199BBB6F93B"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IDesktopWallpaper
+{
+    [PreserveSig] int SetWallpaper([MarshalAs(UnmanagedType.LPWStr)] string monitorID, [MarshalAs(UnmanagedType.LPWStr)] string wallpaper);
+    [PreserveSig] int GetWallpaper([MarshalAs(UnmanagedType.LPWStr)] string monitorID, [MarshalAs(UnmanagedType.LPWStr)] out string wallpaper);
+    [PreserveSig] int GetMonitorDevicePathAt(uint monitorIndex, [MarshalAs(UnmanagedType.LPWStr)] out string monitorID);
+    [PreserveSig] int GetMonitorDevicePathCount(out uint count);
+    [PreserveSig] int GetMonitorRECT([MarshalAs(UnmanagedType.LPWStr)] string monitorID, out RECT displayRect);
+    [PreserveSig] int SetBackgroundColor(uint color);
+    [PreserveSig] int GetBackgroundColor(out uint color);
+    [PreserveSig] int SetPosition(int position);
+    [PreserveSig] int GetPosition(out int position);
+    [PreserveSig] int SetSlideshow(IntPtr items);
+    [PreserveSig] int GetSlideshow(out IntPtr items);
+    [PreserveSig] int AdvanceSlideshow([MarshalAs(UnmanagedType.LPWStr)] string monitorID, int direction);
+    [PreserveSig] int GetStatus(out int state);
+    [PreserveSig] int Enable(bool enable);
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct RECT {
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+}
+
+public class MonitorWallpaperItem
+{
+    public uint Index;
+    public string Path;
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+    public string CurrentWallpaper;
+}
+
+public static class DesktopWallpaperNative
+{
+    public static List<MonitorWallpaperItem> GetActiveMonitors()
+    {
+        var list = new List<MonitorWallpaperItem>();
+        try {
+            var dw = (IDesktopWallpaper)new DesktopWallpaperClass();
+            uint count = 0;
+            if (dw.GetMonitorDevicePathCount(out count) == 0) {
+                for (uint i = 0; i < count; i++) {
+                    string path;
+                    if (dw.GetMonitorDevicePathAt(i, out path) == 0) {
+                        RECT r;
+                        int hrRect = dw.GetMonitorRECT(path, out r);
+                        if (hrRect == 0) {
+                            string curWall = "";
+                            dw.GetWallpaper(path, out curWall);
+                            list.Add(new MonitorWallpaperItem {
+                                Index = i,
+                                Path = path,
+                                Left = r.Left,
+                                Top = r.Top,
+                                Right = r.Right,
+                                Bottom = r.Bottom,
+                                CurrentWallpaper = curWall ?? ""
+                            });
+                        }
+                    }
+                }
+            }
+        } catch {}
+        return list;
+    }
+
+    public static int ApplyWallpaper(string monitorId, string wallpaperPath, int position)
+    {
+        try {
+            var dw = (IDesktopWallpaper)new DesktopWallpaperClass();
+            if (position >= 0 && position <= 5) {
+                dw.SetPosition(position);
+            }
+            return dw.SetWallpaper(string.IsNullOrEmpty(monitorId) ? null : monitorId, wallpaperPath ?? "");
         } catch {
             return -1;
         }
@@ -184,6 +274,63 @@ function Sync-ProfileLaunchApp {
         }
     } catch {
         Write-Warning "Could not launch application '$appTarget': $_"
+    }
+}
+
+# Function to apply per-profile desktop wallpapers with multi-monitor positioning
+function Sync-ProfileWallpapers {
+    param($ProfileItem)
+    if (-not $ProfileItem.Wallpapers) { return }
+    $wCfg = $ProfileItem.Wallpapers
+    if (-not $wCfg.Enabled) { return }
+
+    $posMap = @{
+        "Center" = 0
+        "Tile" = 1
+        "Stretch" = 2
+        "Fit" = 3
+        "Fill" = 4
+        "Span" = 5
+    }
+    $posCode = 4 # Default to Fill
+    if ($wCfg.Position -and $posMap.ContainsKey($wCfg.Position)) {
+        $posCode = $posMap[$wCfg.Position]
+    }
+
+    Write-Host "Applying wallpapers for profile: $($ProfileItem.Name) (Position: $($wCfg.Position))" -ForegroundColor Cyan
+    try {
+        $activeMons = [DesktopWallpaperNative]::GetActiveMonitors()
+        if (-not $activeMons -or $activeMons.Count -eq 0) { return }
+
+        # Mode A: Span across all monitors
+        if ($wCfg.Position -eq "Span" -and $wCfg.SpanImage -and (Test-Path -LiteralPath $wCfg.SpanImage)) {
+            [DesktopWallpaperNative]::ApplyWallpaper($null, $wCfg.SpanImage, 5) | Out-Null
+            return
+        }
+
+        # Mode B: Per-monitor or Single image
+        if ($wCfg.Monitors) {
+            foreach ($prop in $wCfg.Monitors.PSObject.Properties) {
+                $monIdxStr = $prop.Name
+                $imgFile = $prop.Value
+                if ($imgFile -and (Test-Path -LiteralPath $imgFile)) {
+                    $idx = [int]$monIdxStr
+                    # Find matching monitor by 0-based index or 1-based index
+                    $targetMon = $null
+                    if ($idx -lt $activeMons.Count) {
+                        $targetMon = $activeMons[$idx]
+                    } elseif (($idx - 1) -lt $activeMons.Count -and ($idx - 1) -ge 0) {
+                        $targetMon = $activeMons[$idx - 1]
+                    }
+
+                    if ($targetMon) {
+                        [DesktopWallpaperNative]::ApplyWallpaper($targetMon.Path, $imgFile, $posCode) | Out-Null
+                    }
+                }
+            }
+        }
+    } catch {
+        Write-Warning "Failed to set profile wallpapers: $_"
     }
 }
 
@@ -336,6 +483,7 @@ function Invoke-ProfileSwitch {
         Sync-ProfileDevices -ProfileItem $ProfileItem -LiveConfig $liveCfg
         Sync-ProfileAudio -ProfileItem $ProfileItem
         Sync-ProfileDisplayScales -ProfileItem $ProfileItem -AppRoot $profilesDir
+        Sync-ProfileWallpapers -ProfileItem $ProfileItem
         Sync-ProfileLaunchApp -ProfileItem $ProfileItem
 
         # If switching away from single screen (e.g. to Dual, TV, Rig), reset single toggle state
@@ -655,12 +803,13 @@ if ($Tray) {
             param($sender, $e)
             # Guard against spamming multiple windows if already running or loading
             $running = Get-Process -Name "powershell" -ErrorAction SilentlyContinue | Where-Object {
-                $_.MainWindowTitle -match "DeskShift"
+                $_.MainWindowTitle -match "DeskShift" -and $_.MainWindowHandle -ne [IntPtr]::Zero
             }
             if ($running) {
                 # Bring existing window to front
                 Add-Type -TypeDefinition @"
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 public class WinUtil {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);

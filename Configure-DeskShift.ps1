@@ -37,6 +37,7 @@ function Get-CurrentDisplayScales {
 # Core Audio Policy Client for Instant Audio Detection and Switching
 Add-Type -TypeDefinition @"
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 [Guid("F8679F50-850A-41CF-9C72-430F290290C8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -111,6 +112,95 @@ public static class AudioController
         }
     }
 }
+
+[ComImport, Guid("C2CF3110-460E-4fc1-B9D0-8A1C0C9CC4BD")]
+public class DesktopWallpaperClass {}
+
+[ComImport, Guid("B92B56A9-8B55-4E14-9A89-0199BBB6F93B"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IDesktopWallpaper
+{
+    [PreserveSig] int SetWallpaper([MarshalAs(UnmanagedType.LPWStr)] string monitorID, [MarshalAs(UnmanagedType.LPWStr)] string wallpaper);
+    [PreserveSig] int GetWallpaper([MarshalAs(UnmanagedType.LPWStr)] string monitorID, [MarshalAs(UnmanagedType.LPWStr)] out string wallpaper);
+    [PreserveSig] int GetMonitorDevicePathAt(uint monitorIndex, [MarshalAs(UnmanagedType.LPWStr)] out string monitorID);
+    [PreserveSig] int GetMonitorDevicePathCount(out uint count);
+    [PreserveSig] int GetMonitorRECT([MarshalAs(UnmanagedType.LPWStr)] string monitorID, out RECT displayRect);
+    [PreserveSig] int SetBackgroundColor(uint color);
+    [PreserveSig] int GetBackgroundColor(out uint color);
+    [PreserveSig] int SetPosition(int position);
+    [PreserveSig] int GetPosition(out int position);
+    [PreserveSig] int SetSlideshow(IntPtr items);
+    [PreserveSig] int GetSlideshow(out IntPtr items);
+    [PreserveSig] int AdvanceSlideshow([MarshalAs(UnmanagedType.LPWStr)] string monitorID, int direction);
+    [PreserveSig] int GetStatus(out int state);
+    [PreserveSig] int Enable(bool enable);
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct RECT {
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+}
+
+public class MonitorWallpaperItem
+{
+    public uint Index;
+    public string Path;
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+    public string CurrentWallpaper;
+}
+
+public static class DesktopWallpaperNative
+{
+    public static List<MonitorWallpaperItem> GetActiveMonitors()
+    {
+        var list = new List<MonitorWallpaperItem>();
+        try {
+            var dw = (IDesktopWallpaper)new DesktopWallpaperClass();
+            uint count = 0;
+            if (dw.GetMonitorDevicePathCount(out count) == 0) {
+                for (uint i = 0; i < count; i++) {
+                    string path;
+                    if (dw.GetMonitorDevicePathAt(i, out path) == 0) {
+                        RECT r;
+                        int hrRect = dw.GetMonitorRECT(path, out r);
+                        if (hrRect == 0) {
+                            string curWall = "";
+                            dw.GetWallpaper(path, out curWall);
+                            list.Add(new MonitorWallpaperItem {
+                                Index = i,
+                                Path = path,
+                                Left = r.Left,
+                                Top = r.Top,
+                                Right = r.Right,
+                                Bottom = r.Bottom,
+                                CurrentWallpaper = curWall ?? ""
+                            });
+                        }
+                    }
+                }
+            }
+        } catch {}
+        return list;
+    }
+
+    public static int ApplyWallpaper(string monitorId, string wallpaperPath, int position)
+    {
+        try {
+            var dw = (IDesktopWallpaper)new DesktopWallpaperClass();
+            if (position >= 0 && position <= 5) {
+                dw.SetPosition(position);
+            }
+            return dw.SetWallpaper(string.IsNullOrEmpty(monitorId) ? null : monitorId, wallpaperPath ?? "");
+        } catch {
+            return -1;
+        }
+    }
+}
 "@ -ErrorAction SilentlyContinue
 
 function Get-ActiveAudioEndpoints {
@@ -173,7 +263,7 @@ $configDir = Split-Path $ConfigFile
 # Main Form
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "DeskShift - Display Switcher, Hardware & Web Remote Manager"
-$form.Size = New-Object System.Drawing.Size(1120, 750)
+$form.Size = New-Object System.Drawing.Size(1200, 750)
 $form.StartPosition = "CenterScreen"
 $form.Font = New-Object System.Drawing.Font("Segoe UI", 9.5)
 $form.FormBorderStyle = "FixedDialog"
@@ -208,7 +298,7 @@ $form.Controls.Add($headerPanel)
 # Tab Control
 $tabs = New-Object System.Windows.Forms.TabControl
 $tabs.Location = New-Object System.Drawing.Point(20, 85)
-$tabs.Size = New-Object System.Drawing.Size(1065, 560)
+$tabs.Size = New-Object System.Drawing.Size(1145, 560)
 
 # ==============================================================================
 # TAB 1: Profile Assignment Matrix (Devices & Plugs downwards as Rows, Profiles as Columns)
@@ -312,10 +402,21 @@ $btnAppSelect.FlatStyle = "Flat"
 $btnAppSelect.FlatAppearance.BorderSize = 0
 $matrixTopBar.Controls.Add($btnAppSelect)
 
+$btnWallpapers = New-Object System.Windows.Forms.Button
+$btnWallpapers.Text = "Wallpapers"
+$btnWallpapers.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.0, [System.Drawing.FontStyle]::Bold)
+$btnWallpapers.Location = New-Object System.Drawing.Point(1000, 9)
+$btnWallpapers.Size = New-Object System.Drawing.Size(95, 30)
+$btnWallpapers.BackColor = [System.Drawing.Color]::FromArgb(225, 29, 72)
+$btnWallpapers.ForeColor = [System.Drawing.Color]::White
+$btnWallpapers.FlatStyle = "Flat"
+$btnWallpapers.FlatAppearance.BorderSize = 0
+$matrixTopBar.Controls.Add($btnWallpapers)
+
 $btnDeleteProfile = New-Object System.Windows.Forms.Button
 $btnDeleteProfile.Text = "Delete"
 $btnDeleteProfile.Font = New-Object System.Drawing.Font("Segoe UI", 9.0)
-$btnDeleteProfile.Location = New-Object System.Drawing.Point(1000, 9)
+$btnDeleteProfile.Location = New-Object System.Drawing.Point(1100, 9)
 $btnDeleteProfile.Size = New-Object System.Drawing.Size(65, 30)
 $btnDeleteProfile.BackColor = [System.Drawing.Color]::FromArgb(239, 68, 68)
 $btnDeleteProfile.ForeColor = [System.Drawing.Color]::White
@@ -2462,6 +2563,463 @@ $btnAppSelect.add_Click({
         & $refreshMatrixGrid
         $msg = if ($chosenApp) { "Profile '$targetProfName' will now launch:`n$chosenApp $chosenArgs" } else { "Application launch removed for '$targetProfName'." }
         [System.Windows.Forms.MessageBox]::Show($msg, "Launch Settings Saved", "OK", "Information")
+    }
+})
+
+# Wallpaper Assignment & Multi-Monitor Layout Preview Handler
+$btnWallpapers.add_Click({
+    if (-not $cmbProfiles.SelectedItem) {
+        [System.Windows.Forms.MessageBox]::Show("Please select a target profile from the dropdown first.", "No Profile Selected", "OK", "Warning")
+        return
+    }
+
+    $selItem = $cmbProfiles.SelectedItem
+    $targetProfName = if ($selItem.Name) { $selItem.Name } else { $selItem.ToString() }
+    $liveCfg = Get-LiveConfig
+    $profObj = $liveCfg.Profiles | Where-Object { $_.Name -eq $targetProfName } | Select-Object -First 1
+    if (-not $profObj) { return }
+
+    # Query currently active monitors from Windows desktop system
+    $activeMons = [DesktopWallpaperNative]::GetActiveMonitors()
+    if (-not $activeMons -or $activeMons.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show("Could not detect any active monitors via Windows API.", "Monitor Query Error", "OK", "Warning")
+        return
+    }
+
+    $dlgWall = New-Object System.Windows.Forms.Form
+    $dlgWall.Text = "Desktop Wallpapers & Scaling - $targetProfName"
+    $dlgWall.Size = New-Object System.Drawing.Size(860, 680)
+    $dlgWall.StartPosition = "CenterParent"
+    $dlgWall.FormBorderStyle = "FixedDialog"
+    $dlgWall.MaximizeBox = $false
+    $dlgWall.MinimizeBox = $false
+    $dlgWall.BackColor = [System.Drawing.Color]::FromArgb(245, 246, 248)
+
+    # Top Checkbox: Allow DeskShift to manage desktop wallpapers for this profile
+    $chkEnableWall = New-Object System.Windows.Forms.CheckBox
+    $chkEnableWall.Text = "Allow DeskShift to manage Desktop Wallpapers for this profile (Optional)"
+    $chkEnableWall.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 10.0, [System.Drawing.FontStyle]::Bold)
+    $chkEnableWall.Location = New-Object System.Drawing.Point(20, 15)
+    $chkEnableWall.Size = New-Object System.Drawing.Size(600, 26)
+    $isWallEnabled = if ($profObj.Wallpapers -and ($null -ne $profObj.Wallpapers.Enabled)) { [bool]$profObj.Wallpapers.Enabled } else { $false }
+    $chkEnableWall.Checked = $isWallEnabled
+    $dlgWall.Controls.Add($chkEnableWall)
+
+    # Visual Preview Box (DisplayFusion-style)
+    $grpPreview = New-Object System.Windows.Forms.GroupBox
+    $grpPreview.Text = "Wallpaper Preview & Monitor Layout"
+    $grpPreview.Location = New-Object System.Drawing.Point(20, 48)
+    $grpPreview.Size = New-Object System.Drawing.Size(805, 175)
+    $grpPreview.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.0, [System.Drawing.FontStyle]::Bold)
+    $dlgWall.Controls.Add($grpPreview)
+
+    $pnlCanvas = New-Object System.Windows.Forms.Panel
+    $pnlCanvas.Location = New-Object System.Drawing.Point(15, 22)
+    $pnlCanvas.Size = New-Object System.Drawing.Size(775, 140)
+    $pnlCanvas.BackColor = [System.Drawing.Color]::FromArgb(51, 65, 85)
+    $grpPreview.Controls.Add($pnlCanvas)
+
+    # Monitor Selection and Settings GroupBox
+    $grpSettings = New-Object System.Windows.Forms.GroupBox
+    $grpSettings.Text = "Monitor Wallpaper & Sizing Settings"
+    $grpSettings.Location = New-Object System.Drawing.Point(20, 230)
+    $grpSettings.Size = New-Object System.Drawing.Size(805, 335)
+    $grpSettings.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.0, [System.Drawing.FontStyle]::Bold)
+    $dlgWall.Controls.Add($grpSettings)
+
+    # Sizing dropdown
+    $lblSizing = New-Object System.Windows.Forms.Label
+    $lblSizing.Text = "Sizing / Scaling Mode:"
+    $lblSizing.Location = New-Object System.Drawing.Point(20, 28)
+    $lblSizing.Size = New-Object System.Drawing.Size(160, 20)
+    $grpSettings.Controls.Add($lblSizing)
+
+    $cmbSizing = New-Object System.Windows.Forms.ComboBox
+    $cmbSizing.DropDownStyle = "DropDownList"
+    $cmbSizing.Location = New-Object System.Drawing.Point(20, 50)
+    $cmbSizing.Size = New-Object System.Drawing.Size(320, 25)
+    $cmbSizing.Font = New-Object System.Drawing.Font("Segoe UI", 9.0)
+    $cmbSizing.Items.AddRange(@(
+        "Fill (Fit and Clip Edges)",
+        "Fit (Fit Best and Maintain Aspect Ratio)",
+        "Stretch (Stretch to Fit Entire Screen)",
+        "Center (Center Image Unscaled)",
+        "Tile (Repeat Across Screen)",
+        "Span (Span Across All Monitors)"
+    ))
+
+    # Existing position
+    $curPos = if ($profObj.Wallpapers -and $profObj.Wallpapers.Position) { $profObj.Wallpapers.Position } else { "Fill" }
+    switch ($curPos) {
+        "Fill" { $cmbSizing.SelectedIndex = 0 }
+        "Fit" { $cmbSizing.SelectedIndex = 1 }
+        "Stretch" { $cmbSizing.SelectedIndex = 2 }
+        "Center" { $cmbSizing.SelectedIndex = 3 }
+        "Tile" { $cmbSizing.SelectedIndex = 4 }
+        "Span" { $cmbSizing.SelectedIndex = 5 }
+        default { $cmbSizing.SelectedIndex = 0 }
+    }
+    $grpSettings.Controls.Add($cmbSizing)
+
+    # Monitor Selector Buttons
+    $lblMonSelect = New-Object System.Windows.Forms.Label
+    $lblMonSelect.Text = "Select Monitor to Configure:"
+    $lblMonSelect.Location = New-Object System.Drawing.Point(20, 90)
+    $lblMonSelect.Size = New-Object System.Drawing.Size(200, 20)
+    $grpSettings.Controls.Add($lblMonSelect)
+
+    $cmbMonitorPick = New-Object System.Windows.Forms.ComboBox
+    $cmbMonitorPick.DropDownStyle = "DropDownList"
+    $cmbMonitorPick.Location = New-Object System.Drawing.Point(20, 112)
+    $cmbMonitorPick.Size = New-Object System.Drawing.Size(320, 25)
+    $cmbMonitorPick.Font = New-Object System.Drawing.Font("Segoe UI", 9.0)
+    for ($m = 0; $m -lt $activeMons.Count; $m++) {
+        $mon = $activeMons[$m]
+        $w = $mon.Right - $mon.Left
+        $h = $mon.Bottom - $mon.Top
+        $cmbMonitorPick.Items.Add("Monitor $($m + 1): ${w}x${h} at ($($mon.Left), $($mon.Top))") | Out-Null
+    }
+    if ($cmbMonitorPick.Items.Count -gt 0) { $cmbMonitorPick.SelectedIndex = 0 }
+    $grpSettings.Controls.Add($cmbMonitorPick)
+
+    # Local state for wallpaper image assignments: [int] -> [string]
+    $wallState = [ordered]@{}
+    if ($profObj.Wallpapers -and $profObj.Wallpapers.Monitors) {
+        foreach ($prop in $profObj.Wallpapers.Monitors.PSObject.Properties) {
+            $wallState[$prop.Name] = $prop.Value
+        }
+    }
+    $spanImageState = if ($profObj.Wallpapers -and $profObj.Wallpapers.SpanImage) { $profObj.Wallpapers.SpanImage } else { "" }
+
+    # Image path box and browse
+    $lblImgPath = New-Object System.Windows.Forms.Label
+    $lblImgPath.Text = "Wallpaper Image Source:"
+    $lblImgPath.Location = New-Object System.Drawing.Point(20, 150)
+    $lblImgPath.Size = New-Object System.Drawing.Size(200, 20)
+    $grpSettings.Controls.Add($lblImgPath)
+
+    $txtImgPath = New-Object System.Windows.Forms.TextBox
+    $txtImgPath.Location = New-Object System.Drawing.Point(20, 172)
+    $txtImgPath.Size = New-Object System.Drawing.Size(650, 25)
+    $txtImgPath.Font = New-Object System.Drawing.Font("Segoe UI", 9.0)
+    $grpSettings.Controls.Add($txtImgPath)
+
+    $btnBrowseImg = New-Object System.Windows.Forms.Button
+    $btnBrowseImg.Text = "Browse..."
+    $btnBrowseImg.Location = New-Object System.Drawing.Point(680, 170)
+    $btnBrowseImg.Size = New-Object System.Drawing.Size(95, 29)
+    $btnBrowseImg.BackColor = [System.Drawing.Color]::FromArgb(241, 245, 249)
+    $btnBrowseImg.FlatStyle = "Flat"
+    $grpSettings.Controls.Add($btnBrowseImg)
+
+    $btnClearImg = New-Object System.Windows.Forms.Button
+    $btnClearImg.Text = "Clear"
+    $btnClearImg.Location = New-Object System.Drawing.Point(20, 205)
+    $btnClearImg.Size = New-Object System.Drawing.Size(75, 28)
+    $btnClearImg.BackColor = [System.Drawing.Color]::FromArgb(241, 245, 249)
+    $btnClearImg.FlatStyle = "Flat"
+    $grpSettings.Controls.Add($btnClearImg)
+
+    $btnCopyAll = New-Object System.Windows.Forms.Button
+    $btnCopyAll.Text = "Use This Image On All Monitors"
+    $btnCopyAll.Location = New-Object System.Drawing.Point(105, 205)
+    $btnCopyAll.Size = New-Object System.Drawing.Size(210, 28)
+    $btnCopyAll.BackColor = [System.Drawing.Color]::FromArgb(241, 245, 249)
+    $btnCopyAll.FlatStyle = "Flat"
+    $grpSettings.Controls.Add($btnCopyAll)
+
+    # Current monitor index helper
+    $getCurMonKey = {
+        return "$($cmbMonitorPick.SelectedIndex + 1)"
+    }
+
+    $updateSelectedMonitorField = {
+        $key = & $getCurMonKey
+        if ($cmbSizing.SelectedIndex -eq 5) { # Span
+            $lblImgPath.Text = "Span Wallpaper Image Source (Across all monitors):"
+            $txtImgPath.Text = $spanImageState
+            $cmbMonitorPick.Enabled = $false
+        } else {
+            $lblImgPath.Text = "Wallpaper Image Source for Monitor $key:"
+            $cmbMonitorPick.Enabled = $true
+            if ($wallState.Contains($key)) {
+                $txtImgPath.Text = $wallState[$key]
+            } else {
+                # Fallback to current desktop wallpaper if none set
+                $mIdx = $cmbMonitorPick.SelectedIndex
+                if ($mIdx -ge 0 -and $mIdx -lt $activeMons.Count) {
+                    $txtImgPath.Text = $activeMons[$mIdx].CurrentWallpaper
+                } else {
+                    $txtImgPath.Text = ""
+                }
+            }
+        }
+        $pnlCanvas.Invalidate()
+    }
+
+    $cmbMonitorPick.add_SelectedIndexChanged({
+        & $updateSelectedMonitorField
+    })
+
+    $cmbSizing.add_SelectedIndexChanged({
+        & $updateSelectedMonitorField
+    })
+
+    $txtImgPath.add_TextChanged({
+        $key = & $getCurMonKey
+        if ($cmbSizing.SelectedIndex -eq 5) {
+            $script:spanImageState = $txtImgPath.Text.Trim()
+        } else {
+            $wallState[$key] = $txtImgPath.Text.Trim()
+        }
+        $pnlCanvas.Invalidate()
+    })
+
+    $btnBrowseImg.add_Click({
+        $openDlg = New-Object System.Windows.Forms.OpenFileDialog
+        $openDlg.Title = "Select Desktop Wallpaper Image"
+        $openDlg.Filter = "Image Files (*.jpg;*.jpeg;*.png;*.bmp)|*.jpg;*.jpeg;*.png;*.bmp|All Files (*.*)|*.*"
+        if ($openDlg.ShowDialog($dlgWall) -eq [System.Windows.Forms.DialogResult]::OK) {
+            $txtImgPath.Text = $openDlg.FileName
+        }
+    })
+
+    $btnClearImg.add_Click({
+        $txtImgPath.Text = ""
+    })
+
+    $btnCopyAll.add_Click({
+        $val = $txtImgPath.Text.Trim()
+        for ($m = 1; $m -le $activeMons.Count; $m++) {
+            $wallState["$m"] = $val
+        }
+        $pnlCanvas.Invalidate()
+        [System.Windows.Forms.MessageBox]::Show("Applied image to all $($activeMons.Count) monitors.", "Applied", "OK", "Information")
+    })
+
+    # Render Proportional Monitor Preview Canvas
+    $pnlCanvas.add_Paint({
+        param($sender, $e)
+        $g = $e.Graphics
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+
+        if ($activeMons.Count -eq 0) { return }
+
+        # Calculate bounding rectangle encompassing all monitors
+        $minX = [int]::MaxValue; $minY = [int]::MaxValue
+        $maxX = [int]::MinValue; $maxY = [int]::MinValue
+
+        foreach ($m in $activeMons) {
+            if ($m.Left -lt $minX) { $minX = $m.Left }
+            if ($m.Top -lt $minY) { $minY = $m.Top }
+            if ($m.Right -gt $maxX) { $maxX = $m.Right }
+            if ($m.Bottom -gt $maxY) { $maxY = $m.Bottom }
+        }
+
+        $totalW = [Math]::Max(100, $maxX - $minX)
+        $totalH = [Math]::Max(100, $maxY - $minY)
+
+        $availW = $pnlCanvas.Width - 40
+        $availH = $pnlCanvas.Height - 30
+        $scale = [Math]::Min($availW / $totalW, $availH / $totalH)
+
+        $drawOffsetX = 20 + [int](($availW - ($totalW * $scale)) / 2)
+        $drawOffsetY = 15 + [int](($availH - ($totalH * $scale)) / 2)
+
+        $curIdx = $cmbMonitorPick.SelectedIndex
+
+        for ($i = 0; $i -lt $activeMons.Count; $i++) {
+            $mon = $activeMons[$i]
+            $rx = $drawOffsetX + [int](($mon.Left - $minX) * $scale)
+            $ry = $drawOffsetY + [int](($mon.Top - $minY) * $scale)
+            $rw = [Math]::Max(10, [int](($mon.Right - $mon.Left) * $scale))
+            $rh = [Math]::Max(10, [int](($mon.Bottom - $mon.Top) * $scale))
+
+            $rect = New-Object System.Drawing.Rectangle($rx, $ry, $rw, $rh)
+
+            # Determine image for this monitor
+            $imgToDraw = $null
+            $key = "$($i + 1)"
+            $path = ""
+            if ($cmbSizing.SelectedIndex -eq 5) {
+                $path = $spanImageState
+            } elseif ($wallState.Contains($key) -and $wallState[$key]) {
+                $path = $wallState[$key]
+            } elseif ($mon.CurrentWallpaper) {
+                $path = $mon.CurrentWallpaper
+            }
+
+            if ($path -and (Test-Path -LiteralPath $path)) {
+                try {
+                    $imgToDraw = [System.Drawing.Image]::FromFile($path)
+                } catch {}
+            }
+
+            if ($imgToDraw) {
+                $g.DrawImage($imgToDraw, $rect)
+                $imgToDraw.Dispose()
+            } else {
+                $bgBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(30, 41, 59))
+                $g.FillRectangle($bgBrush, $rect)
+                $bgBrush.Dispose()
+            }
+
+            # Border: Highlight currently selected monitor with bold cyan/red border
+            $isSelected = ($i -eq $curIdx)
+            $borderPen = if ($isSelected) {
+                New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(239, 68, 68), 3)
+            } else {
+                New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(203, 213, 225), 2)
+            }
+            $g.DrawRectangle($borderPen, $rect)
+            $borderPen.Dispose()
+
+            # Monitor number badge in upper-left corner
+            $badgeRect = New-Object System.Drawing.Rectangle($rx + 4, $ry + 4, 22, 22)
+            $badgeBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(150, 0, 0, 0))
+            $g.FillRectangle($badgeBrush, $badgeRect)
+            $badgeBrush.Dispose()
+
+            $badgeFont = New-Object System.Drawing.Font("Segoe UI", 9.0, [System.Drawing.FontStyle]::Bold)
+            $textBrush = [System.Drawing.Brushes]::White
+            $sf = New-Object System.Drawing.StringFormat
+            $sf.Alignment = [System.Drawing.StringAlignment]::Center
+            $sf.LineAlignment = [System.Drawing.StringAlignment]::Center
+            $g.DrawString("$($i + 1)", $badgeFont, $textBrush, $badgeRect, $sf)
+            $badgeFont.Dispose()
+            $sf.Dispose()
+        }
+    })
+
+    # Allow clicking on a monitor box in the canvas to select it!
+    $pnlCanvas.add_MouseDown({
+        param($sender, $e)
+        if ($cmbSizing.SelectedIndex -eq 5) { return } # Span mode
+
+        $minX = [int]::MaxValue; $minY = [int]::MaxValue
+        $maxX = [int]::MinValue; $maxY = [int]::MinValue
+        foreach ($m in $activeMons) {
+            if ($m.Left -lt $minX) { $minX = $m.Left }
+            if ($m.Top -lt $minY) { $minY = $m.Top }
+            if ($m.Right -gt $maxX) { $maxX = $m.Right }
+            if ($m.Bottom -gt $maxY) { $maxY = $m.Bottom }
+        }
+        $totalW = [Math]::Max(100, $maxX - $minX)
+        $totalH = [Math]::Max(100, $maxY - $minY)
+        $availW = $pnlCanvas.Width - 40
+        $availH = $pnlCanvas.Height - 30
+        $scale = [Math]::Min($availW / $totalW, $availH / $totalH)
+        $drawOffsetX = 20 + [int](($availW - ($totalW * $scale)) / 2)
+        $drawOffsetY = 15 + [int](($availH - ($totalH * $scale)) / 2)
+
+        for ($i = 0; $i -lt $activeMons.Count; $i++) {
+            $mon = $activeMons[$i]
+            $rx = $drawOffsetX + [int](($mon.Left - $minX) * $scale)
+            $ry = $drawOffsetY + [int](($mon.Top - $minY) * $scale)
+            $rw = [Math]::Max(10, [int](($mon.Right - $mon.Left) * $scale))
+            $rh = [Math]::Max(10, [int](($mon.Bottom - $mon.Top) * $scale))
+            $rect = New-Object System.Drawing.Rectangle($rx, $ry, $rw, $rh)
+
+            if ($rect.Contains($e.Location)) {
+                $cmbMonitorPick.SelectedIndex = $i
+                break
+            }
+        }
+    })
+
+    # "Preview Now" Button to immediately test on live monitors
+    $btnPreviewNow = New-Object System.Windows.Forms.Button
+    $btnPreviewNow.Text = "Preview Now On Displays"
+    $btnPreviewNow.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.0, [System.Drawing.FontStyle]::Bold)
+    $btnPreviewNow.Location = New-Object System.Drawing.Point(20, 585)
+    $btnPreviewNow.Size = New-Object System.Drawing.Size(185, 34)
+    $btnPreviewNow.BackColor = [System.Drawing.Color]::FromArgb(59, 130, 246)
+    $btnPreviewNow.ForeColor = [System.Drawing.Color]::White
+    $btnPreviewNow.FlatStyle = "Flat"
+    $dlgWall.Controls.Add($btnPreviewNow)
+
+    $posKeyMap = @{
+        0 = "Fill"
+        1 = "Fit"
+        2 = "Stretch"
+        3 = "Center"
+        4 = "Tile"
+        5 = "Span"
+    }
+
+    $btnPreviewNow.add_Click({
+        $posCode = $cmbSizing.SelectedIndex
+        if ($posCode -eq 5) {
+            # Span
+            $spanImg = $txtImgPath.Text.Trim()
+            if ($spanImg -and (Test-Path -LiteralPath $spanImg)) {
+                [DesktopWallpaperNative]::ApplyWallpaper($null, $spanImg, 5) | Out-Null
+            } else {
+                [System.Windows.Forms.MessageBox]::Show("Please choose a valid image file to test span mode.", "No Image", "OK", "Warning")
+            }
+        } else {
+            for ($m = 0; $m -lt $activeMons.Count; $m++) {
+                $mon = $activeMons[$m]
+                $k = "$($m + 1)"
+                $img = if ($wallState.Contains($k)) { $wallState[$k] } else { "" }
+                if ($img -and (Test-Path -LiteralPath $img)) {
+                    [DesktopWallpaperNative]::ApplyWallpaper($mon.Path, $img, $posCode) | Out-Null
+                }
+            }
+        }
+    })
+
+    # Save and Cancel
+    $btnSaveWall = New-Object System.Windows.Forms.Button
+    $btnSaveWall.Text = "Save Wallpaper Settings"
+    $btnSaveWall.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $btnSaveWall.Location = New-Object System.Drawing.Point(525, 585)
+    $btnSaveWall.Size = New-Object System.Drawing.Size(180, 34)
+    $btnSaveWall.BackColor = [System.Drawing.Color]::FromArgb(225, 29, 72)
+    $btnSaveWall.ForeColor = [System.Drawing.Color]::White
+    $btnSaveWall.FlatStyle = "Flat"
+    $dlgWall.Controls.Add($btnSaveWall)
+
+    $btnCancelWall = New-Object System.Windows.Forms.Button
+    $btnCancelWall.Text = "Cancel"
+    $btnCancelWall.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $btnCancelWall.Location = New-Object System.Drawing.Point(715, 585)
+    $btnCancelWall.Size = New-Object System.Drawing.Size(100, 34)
+    $dlgWall.Controls.Add($btnCancelWall)
+    $dlgWall.AcceptButton = $btnSaveWall
+    $dlgWall.CancelButton = $btnCancelWall
+
+    & $updateSelectedMonitorField
+
+    if ($dlgWall.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
+        $enabled = $chkEnableWall.Checked
+        $posName = $posKeyMap[$cmbSizing.SelectedIndex]
+
+        $cleanMonitors = [ordered]@{}
+        foreach ($k in $wallState.Keys) {
+            $cleanVal = $wallState[$k]
+            if ($cleanVal -and $cleanVal.Trim()) {
+                $cleanMonitors[$k] = $cleanVal.Trim()
+            }
+        }
+
+        $wObj = [PSCustomObject]@{
+            Enabled   = $enabled
+            Position  = $posName
+            Monitors  = $cleanMonitors
+            SpanImage = $spanImageState
+        }
+
+        if ($profObj.PSObject.Properties["Wallpapers"]) {
+            $profObj.Wallpapers = $wObj
+        } else {
+            $profObj | Add-Member -MemberType NoteProperty -Name "Wallpapers" -Value $wObj
+        }
+
+        Save-LiveConfig -cfg $liveCfg
+        & $refreshMatrixGrid
+        $statusMsg = if ($enabled) { "Enabled ($posName)" } else { "Disabled" }
+        [System.Windows.Forms.MessageBox]::Show("Wallpaper settings saved for '$targetProfName': $statusMsg", "Settings Saved", "OK", "Information")
     }
 })
 
