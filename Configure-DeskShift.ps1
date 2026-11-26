@@ -1536,7 +1536,7 @@ $btnCaptureLayout.add_Click({
                 }
                 Save-LiveConfig -cfg $liveCfg
                 foreach ($k in $capturedScales.Keys) {
-                    $scaleSummaryList += "Display $k: $($capturedScales[$k])%"
+                    $scaleSummaryList += "Display ${k}: $($capturedScales[$k])%"
                 }
             }
         }
