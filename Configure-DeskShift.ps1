@@ -3690,7 +3690,7 @@ $btnWallpapers.add_Click({
             $g.DrawRectangle($borderPen, $rect)
             $borderPen.Dispose()
 
-            $badgeRect = New-Object System.Drawing.Rectangle($rx + 4, $ry + 4, 24, 22)
+            $badgeRect = New-Object System.Drawing.Rectangle(($rx + 4), ($ry + 4), 24, 22)
             $badgeBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(180, 0, 0, 0))
             $g.FillRectangle($badgeBrush, $badgeRect)
 
@@ -3699,14 +3699,14 @@ $btnWallpapers.add_Click({
             $sf = New-Object System.Drawing.StringFormat
             $sf.Alignment = [System.Drawing.StringAlignment]::Center
             $sf.LineAlignment = [System.Drawing.StringAlignment]::Center
-            $g.DrawString("$($i + 1)", $badgeFont, $textBrush, $badgeRect, $sf)
+            $g.DrawString("$($i + 1)", $badgeFont, $textBrush, [System.Drawing.RectangleF]$badgeRect, $sf)
 
             $resText = "$($mon.Width)x$($mon.Height)"
             $resFont = New-Object System.Drawing.Font("Segoe UI", 7.5)
             $resSize = $g.MeasureString($resText, $resFont)
-            $resRect = New-Object System.Drawing.Rectangle($rx + $rw - [int]$resSize.Width - 6, $ry + $rh - [int]$resSize.Height - 4, [int]$resSize.Width + 4, [int]$resSize.Height + 2)
+            $resRect = New-Object System.Drawing.Rectangle(($rx + $rw - [int]$resSize.Width - 6), ($ry + $rh - [int]$resSize.Height - 4), ([int]$resSize.Width + 4), ([int]$resSize.Height + 2))
             $g.FillRectangle($badgeBrush, $resRect)
-            $g.DrawString($resText, $resFont, $textBrush, $resRect, $sf)
+            $g.DrawString($resText, $resFont, $textBrush, [System.Drawing.RectangleF]$resRect, $sf)
 
             $badgeBrush.Dispose()
             $badgeFont.Dispose()
