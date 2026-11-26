@@ -3693,7 +3693,6 @@ $btnWallpapers.add_Click({
             $badgeRect = New-Object System.Drawing.Rectangle($rx + 4, $ry + 4, 24, 22)
             $badgeBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(180, 0, 0, 0))
             $g.FillRectangle($badgeBrush, $badgeRect)
-            $badgeBrush.Dispose()
 
             $badgeFont = New-Object System.Drawing.Font("Segoe UI", 9.0, [System.Drawing.FontStyle]::Bold)
             $textBrush = [System.Drawing.Brushes]::White
@@ -3709,6 +3708,7 @@ $btnWallpapers.add_Click({
             $g.FillRectangle($badgeBrush, $resRect)
             $g.DrawString($resText, $resFont, $textBrush, $resRect, $sf)
 
+            $badgeBrush.Dispose()
             $badgeFont.Dispose()
             $resFont.Dispose()
             $sf.Dispose()
