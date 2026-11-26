@@ -2345,7 +2345,8 @@ $btnAppSelect.add_Click({
     }
 
     $btnSteamBP = New-Object System.Windows.Forms.Button
-    $btnSteamBP.Text = "🎮 Steam Big Picture"
+    $btnSteamBP.Text = "Steam Big Picture"
+    $btnSteamBP.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.0, [System.Drawing.FontStyle]::Bold)
     $btnSteamBP.Location = New-Object System.Drawing.Point(20, 198)
     $btnSteamBP.Size = New-Object System.Drawing.Size(155, 30)
     $btnSteamBP.BackColor = [System.Drawing.Color]::FromArgb(241, 245, 249)
@@ -2362,9 +2363,10 @@ $btnAppSelect.add_Click({
     })
 
     $btnClearApp = New-Object System.Windows.Forms.Button
-    $btnClearApp.Text = "❌ Clear (No App)"
+    $btnClearApp.Text = "Clear (No App)"
+    $btnClearApp.Font = New-Object System.Drawing.Font("Segoe UI", 9.0)
     $btnClearApp.Location = New-Object System.Drawing.Point(185, 198)
-    $btnClearApp.Size = New-Object System.Drawing.Size(130, 30)
+    $btnClearApp.Size = New-Object System.Drawing.Size(120, 30)
     $btnClearApp.BackColor = [System.Drawing.Color]::FromArgb(241, 245, 249)
     $btnClearApp.FlatStyle = "Flat"
     $dlgApp.Controls.Add($btnClearApp)
