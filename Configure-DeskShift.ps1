@@ -2740,7 +2740,7 @@ $btnWallpapers.add_Click({
             $txtImgPath.Text = $spanImageState
             $cmbMonitorPick.Enabled = $false
         } else {
-            $lblImgPath.Text = "Wallpaper Image Source for Monitor $key:"
+            $lblImgPath.Text = "Wallpaper Image Source for Monitor ${key}:"
             $cmbMonitorPick.Enabled = $true
             if ($wallState.Contains($key)) {
                 $txtImgPath.Text = $wallState[$key]

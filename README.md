@@ -1,10 +1,44 @@
 # DeskShift
 
-Native Win32 display, audio, USB, and smart plug switcher for Windows 10 and 11.
+Native Win32 display, audio, USB peripheral, and smart plug switcher for Windows 10 and 11.
 
-DeskShift is a standalone system tray utility designed for multi-display workstations and gaming setups (such as dual desk monitors, triple-screen sim rigs, VR headsets, and secondary TVs). 
+DeskShift is a standalone system tray utility designed for multi-display workstations and gaming setups—especially single PCs powering both a desk workstation and a sim rig, triple-screen setup, VR headset, or TV.
 
-Traditional utilities often rely on virtual display drivers or slow enumeration that can cause desktop flicker and window reorganizations. DeskShift interacts directly with the Windows Connecting and Configuring Displays (CCD) API (`SetDisplayConfig`), changing display topologies in tens of milliseconds.
+Traditional utilities often rely on virtual display drivers or slow enumeration that causes desktop flicker, scrambled window layouts, and lost audio routing. DeskShift interacts directly with the Windows Connecting and Configuring Displays (CCD) API (`SetDisplayConfig`), switching display topologies in tens of milliseconds while orchestrating USB hardware and power states in a single atomic profile action.
+
+---
+
+## The Problem: The Single-PC Workstation & Sim Rig Dilemma
+
+Many enthusiasts run a high-performance PC that drives both everyday desk monitors (e.g., dual 2K screens) and a dedicated sim racing cockpit (e.g., triple 1440p screens, VR headsets, direct-drive wheels, and pedals).
+
+Switching between them manually is painful:
+1. **Windows Display Settings** frequently scrambles monitor order, refresh rates, and desktop icon positions.
+2. **Ghost USB Controllers:** Windows games often detect racing wheels or pedals while you are trying to play normal games or work at your desk.
+3. **Power Draw & Standby Issues:** Triple screens and heavy peripherals left powered on draw unnecessary power and can wake unexpectedly.
+4. **Audio Routing:** Windows often fails to switch the default sound output to the correct headset or speaker system.
+
+**DeskShift solves this with a single click or mobile tap:**
+- **Desk Profile:** Restores dual desk monitors, sets desk speakers, enables tablet/productivity USBs, and cuts power to the sim rig via smart plug.
+- **Sim Rig Profile:** Powers up rig screens via smart plug, enables direct-drive wheel/pedal USB devices in Device Manager, applies the triple-screen topology with exact refresh rates, and routes audio to the rig headset.
+
+| Windows System Tray Menu | Mobile Touch & Power Dashboard |
+| :---: | :---: |
+| <a href="docs/screenshots/tray_menu.png"><img src="docs/screenshots/tray_menu.png" alt="DeskShift System Tray Menu" height="350" /></a> | <a href="docs/screenshots/phone_dashboard.png"><img src="docs/screenshots/phone_dashboard.png" alt="DeskShift Mobile Touch Dashboard" height="350" /></a> |
+
+---
+
+## Configuration Interface
+
+DeskShift provides a native Win32 GUI configurator (`Configure-DeskShift.ps1`) to capture display topologies, assign audio playback devices, manage smart plug relays, and map USB peripherals:
+
+| Profile Assignment Matrix | Smart Plug Configuration |
+| :---: | :---: |
+| ![Profile Matrix](docs/screenshots/config_matrix.png) | ![Smart Plugs](docs/screenshots/config_smart_plugs.png) |
+
+| Managed USB Hardware | Mobile Web & iOS Shortcuts |
+| :---: | :---: |
+| ![Managed USB Devices](docs/screenshots/config_usb_devices.png) | ![Mobile Web Remote](docs/screenshots/config_web_portal.png) |
 
 ---
 
@@ -55,7 +89,10 @@ Right-click the tray icon and select **Configure DeskShift...** (or launch `Conf
 3. **Hardware Matrix:** In the **Power & Device Matrix** table, select which smart plugs and USB devices should be active for each profile.
 4. **Windows Autostart:** Select **Start DeskShift with Windows** if you want the tray engine to run on system logon.
 
-### 3. iOS Shortcuts and Web Remote Setup
+### 3. iOS Shortcuts, Stream Deck & Automation Setup
+
+DeskShift includes a built-in mobile web dashboard and REST API server in `web-remote/`:
+
 1. If using the optional mobile web remote, install its dependencies once:
    ```cmd
    cd web-remote
@@ -63,9 +100,18 @@ Right-click the tray icon and select **Configure DeskShift...** (or launch `Conf
    ```
 2. Open the **Mobile Web & iOS Shortcuts** tab in the configurator.
 3. Ensure the remote server toggle is enabled.
-4. The instructions pane lists direct `POST` URLs formatted with clean slugs for each profile (e.g., `POST https://<your-ip>/api/profile/racing-rig`).
-5. In the iOS Shortcuts app, add a **Get Contents of URL** action, set the HTTP method to `POST`, and paste the target endpoint.
-6. If using HTTPS with a self-signed certificate on your local network, click **Regenerate Self-Signed SSL Cert** to generate a certificate covering your machine's current local IP address.
+4. The instructions pane lists direct `POST` URLs formatted with clean slugs for each profile (e.g., `POST https://<your-ip>:8443/api/profile/racing-rig`).
+5. **iOS Shortcuts:**
+   - Add a **Get Contents of URL** action.
+   - Set HTTP Method to `POST`.
+   - Paste the target endpoint URL.
+6. **Elgato Stream Deck / External Tools:**
+   - Use the **System: Website** action with an HTTP POST request, or trigger a local CLI shortcut:
+     ```cmd
+     powershell -ExecutionPolicy Bypass -File "scripts\DeskShift.ps1" -Profile "Racing Rig"
+     ```
+7. **Local HTTPS Certificate:**
+   - If using HTTPS with a self-signed certificate on your local network, click **Regenerate Self-Signed SSL Cert** in the configurator to generate a certificate covering your machine's current local IP address.
 
 ---
 
@@ -111,11 +157,3 @@ NativeEngine has no external SDK or NuGet dependencies. It compiles using the st
 ## License
 
 MIT License.
-
----
-
-## Backlog / Roadmap
-
-- **Per-Profile Multi-Monitor Wallpaper Management (Optional / Lightweight):**
-  - Ability to optionally assign wallpapers per display for each profile (to replace DisplayFusion's wallpaper switcher).
-  - Designed as a strictly opt-in feature using native Windows `IDesktopWallpaper` COM API so core display switching remains lightweight with zero background polling or bloat.
