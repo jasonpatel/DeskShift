@@ -3045,19 +3045,35 @@ $btnWallpapers.add_Click({
         $key = & $getCurMonKey
         if ($cmbSizing.SelectedIndex -eq 5) { # Span
             $lblImgPath.Text = "Span Wallpaper Image Source (Across all monitors):"
+            if (-not $script:spanImageState) {
+                # Pre-populate span image from current monitor or first monitor with an image
+                if ($wallState.Contains($key) -and $wallState[$key]) {
+                    $script:spanImageState = $wallState[$key]
+                } else {
+                    foreach ($k in $wallState.Keys) {
+                        if ($wallState[$k]) { $script:spanImageState = $wallState[$k]; break }
+                    }
+                }
+            }
             $txtImgPath.Text = $script:spanImageState
             $cmbMonitorPick.Enabled = $false
         } else {
             $lblImgPath.Text = "Wallpaper Image Source for Monitor ${key}:"
             $cmbMonitorPick.Enabled = $true
-            if ($wallState.Contains($key)) {
+            if ($wallState.Contains($key) -and $wallState[$key]) {
                 $txtImgPath.Text = $wallState[$key]
             } else {
-                $mIdx = $cmbMonitorPick.SelectedIndex
-                if ($mIdx -ge 0 -and $mIdx -lt $mons.Count) {
-                    $txtImgPath.Text = $mons[$mIdx].CurrentWallpaper
+                # Fallback to current span image or first available monitor image
+                if ($script:spanImageState) {
+                    $wallState[$key] = $script:spanImageState
+                    $txtImgPath.Text = $script:spanImageState
                 } else {
-                    $txtImgPath.Text = ""
+                    $mIdx = $cmbMonitorPick.SelectedIndex
+                    if ($mIdx -ge 0 -and $mIdx -lt $mons.Count -and $mons[$mIdx].CurrentWallpaper) {
+                        $txtImgPath.Text = $mons[$mIdx].CurrentWallpaper
+                    } else {
+                        $txtImgPath.Text = ""
+                    }
                 }
             }
         }
@@ -3282,7 +3298,15 @@ $btnWallpapers.add_Click({
                 $iw = $imgToDraw.Width
                 $ih = $imgToDraw.Height
 
-                if ($sizing -like "*Fit Best*") {
+                if ($cmbSizing.SelectedIndex -eq 5) {
+                    # Span mode: image spans across the entire multi-monitor bounding box
+                    $spanScale = [Math]::Max($availW / $iw, $availH / $ih)
+                    $sdw = [int]($iw * $spanScale)
+                    $sdh = [int]($ih * $spanScale)
+                    $sdx = 20 + [int](($availW - $sdw) / 2) + $offX
+                    $sdy = 15 + [int](($availH - $sdh) / 2) + $offY
+                    $g.DrawImage($imgToDraw, $sdx, $sdy, $sdw, $sdh)
+                } elseif ($sizing -like "*Fit Best*") {
                     $imgScale = [Math]::Min($rw / $iw, $rh / $ih)
                     $dw = [int]($iw * $imgScale)
                     $dh = [int]($ih * $imgScale)
