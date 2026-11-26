@@ -221,6 +221,104 @@ public static class DesktopWallpaperNative
 }
 "@ -ErrorAction SilentlyContinue
 
+# Helper to generate custom transformed wallpaper file (with offset, flip, bg color)
+function New-TransformedWallpaper {
+    param(
+        [string]$SourcePath,
+        [int]$TargetWidth,
+        [int]$TargetHeight,
+        [string]$SizingMode,
+        [int]$OffsetX = 0,
+        [int]$OffsetY = 0,
+        [bool]$FlipH = $false,
+        [bool]$FlipV = $false,
+        [string]$BgColorHex = "#000000",
+        [string]$OutputPath
+    )
+
+    if (-not (Test-Path -LiteralPath $SourcePath)) { return $null }
+
+    Add-Type -AssemblyName System.Drawing
+    try {
+        $srcImg = [System.Drawing.Image]::FromFile($SourcePath)
+        $bmp = New-Object System.Drawing.Bitmap($srcImg)
+        $srcImg.Dispose()
+
+        if ($FlipH -and $FlipV) {
+            $bmp.RotateFlip([System.Drawing.RotateFlipType]::RotateNoneFlipXY)
+        } elseif ($FlipH) {
+            $bmp.RotateFlip([System.Drawing.RotateFlipType]::RotateNoneFlipX)
+        } elseif ($FlipV) {
+            $bmp.RotateFlip([System.Drawing.RotateFlipType]::RotateNoneFlipY)
+        }
+
+        $destBmp = New-Object System.Drawing.Bitmap($TargetWidth, $TargetHeight, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $g = [System.Drawing.Graphics]::FromImage($destBmp)
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $g.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+
+        $bgColor = try { [System.Drawing.ColorTranslator]::FromHtml($BgColorHex) } catch { [System.Drawing.Color]::Black }
+        $brush = New-Object System.Drawing.SolidBrush($bgColor)
+        $g.FillRectangle($brush, 0, 0, $TargetWidth, $TargetHeight)
+        $brush.Dispose()
+
+        $srcW = $bmp.Width
+        $srcH = $bmp.Height
+
+        switch ($SizingMode) {
+            "Stretch" {
+                $destRect = New-Object System.Drawing.Rectangle($OffsetX, $OffsetY, $TargetWidth, $TargetHeight)
+                $g.DrawImage($bmp, $destRect)
+            }
+            "Center" {
+                $x = [int](($TargetWidth - $srcW) / 2) + $OffsetX
+                $y = [int](($TargetHeight - $srcH) / 2) + $OffsetY
+                $destRect = New-Object System.Drawing.Rectangle($x, $y, $srcW, $srcH)
+                $g.DrawImage($bmp, $destRect)
+            }
+            "Tile" {
+                $tb = New-Object System.Drawing.TextureBrush($bmp)
+                $tb.TranslateTransform($OffsetX, $OffsetY)
+                $g.FillRectangle($tb, 0, 0, $TargetWidth, $TargetHeight)
+                $tb.Dispose()
+            }
+            "Fit" {
+                $scale = [Math]::Min($TargetWidth / $srcW, $TargetHeight / $srcH)
+                $drawW = [int]($srcW * $scale)
+                $drawH = [int]($srcH * $scale)
+                $x = [int](($TargetWidth - $drawW) / 2) + $OffsetX
+                $y = [int](($TargetHeight - $drawH) / 2) + $OffsetY
+                $destRect = New-Object System.Drawing.Rectangle($x, $y, $drawW, $drawH)
+                $g.DrawImage($bmp, $destRect)
+            }
+            default { # "Fill"
+                $scale = [Math]::Max($TargetWidth / $srcW, $TargetHeight / $srcH)
+                $drawW = [int]($srcW * $scale)
+                $drawH = [int]($srcH * $scale)
+                $x = [int](($TargetWidth - $drawW) / 2) + $OffsetX
+                $y = [int](($TargetHeight - $drawH) / 2) + $OffsetY
+                $destRect = New-Object System.Drawing.Rectangle($x, $y, $drawW, $drawH)
+                $g.DrawImage($bmp, $destRect)
+            }
+        }
+
+        $g.Dispose()
+        $bmp.Dispose()
+
+        $parentDir = Split-Path $OutputPath -Parent
+        if (-not (Test-Path -LiteralPath $parentDir)) { New-Item -ItemType Directory -Path $parentDir -Force | Out-Null }
+
+        $destBmp.Save($OutputPath, [System.Drawing.Imaging.ImageFormat]::Png)
+        $destBmp.Dispose()
+        return $OutputPath
+    } catch {
+        Write-Warning "Failed to render transformed wallpaper: $_"
+        return $null
+    }
+}
+
 function Get-ActiveAudioEndpoints {
     $results = @()
     try {
@@ -3316,8 +3414,8 @@ $btnWallpapers.add_Click({
                 } elseif ($sizing -like "*Stretch*") {
                     $g.DrawImage($imgToDraw, $rx + $offX, $ry + $offY, $rw, $rh)
                 } elseif ($sizing -like "*Center*") {
-                    $dw = [int]($iw * $scale)
-                    $dh = [int]($ih * $scale)
+                    $dw = [int]($iw * $pxScaleX)
+                    $dh = [int]($ih * $pxScaleY)
                     $dx = $rx + [int](($rw - $dw) / 2) + $offX
                     $dy = $ry + [int](($rh - $dh) / 2) + $offY
                     $g.DrawImage($imgToDraw, $dx, $dy, $dw, $dh)
