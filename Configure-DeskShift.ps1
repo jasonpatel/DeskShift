@@ -3048,6 +3048,9 @@ $btnWallpapers.add_Click({
     }
 
     $getCurMonKey = {
+        if ($cmbSizing.SelectedIndex -eq 5) {
+            return "1"
+        }
         return "$($cmbMonitorPick.SelectedIndex + 1)"
     }
 
@@ -3280,6 +3283,7 @@ $btnWallpapers.add_Click({
             }
             $txtImgPath.Text = $script:spanImageState
             $cmbMonitorPick.Enabled = $false
+            $key = "1" # In Span mode, adjustments apply across the entire spanned canvas using key "1"
         } else {
             $lblImgPath.Text = "Wallpaper Image Source for Monitor ${key}:"
             $cmbMonitorPick.Enabled = $true
@@ -3585,16 +3589,20 @@ $btnWallpapers.add_Click({
                 $pxScaleX = if ($monW -gt 0) { $rw / $monW } else { $scale }
                 $pxScaleY = if ($monH -gt 0) { $rh / $monH } else { $scale }
 
-                $offX = if ($adj) { [int]($adj.OffsetX * $pxScaleX) } else { 0 }
-                $offY = if ($adj) { [int]($adj.OffsetY * $pxScaleY) } else { 0 }
-                $scaleMul = if ($adj -and $adj.ScalePercent) { [Math]::Max(0.01, [double]$adj.ScalePercent / 100.0) } else { 1.0 }
+                # In Span mode, adjustments (offset, scale, flips) come from span adjustment key "1"
+                $spanAdj = if ($adjState.Contains("1")) { $adjState["1"] } else { $null }
+                $activeAdj = if ($cmbSizing.SelectedIndex -eq 5) { $spanAdj } else { $adj }
+
+                $offX = if ($activeAdj) { [int]($activeAdj.OffsetX * $pxScaleX) } else { 0 }
+                $offY = if ($activeAdj) { [int]($activeAdj.OffsetY * $pxScaleY) } else { 0 }
+                $scaleMul = if ($activeAdj -and $activeAdj.ScalePercent) { [Math]::Max(0.01, [double]$activeAdj.ScalePercent / 100.0) } else { 1.0 }
 
                 $sizing = if ($cmbSizing.SelectedItem) { $cmbSizing.SelectedItem.ToString() } else { "Fill" }
                 $iw = $imgToDraw.Width
                 $ih = $imgToDraw.Height
 
                 if ($cmbSizing.SelectedIndex -eq 5) {
-                    # Span mode with Bezel / Gap offset compensation
+                    # Span mode with Bezel / Gap offset compensation and Scale percentage
                     # Calculate cumulative horizontal gap up to monitor i
                     $cumGap = 0
                     $totalBezelGaps = 0
@@ -3614,8 +3622,9 @@ $btnWallpapers.add_Click({
                     }
 
                     $virtTotalW = $totalW + $totalBezelGaps
-                    $spanScale = [Math]::Max($availW / $virtTotalW, $availH / $totalH)
-                    $imgBaseScale = [Math]::Max($virtTotalW / $iw, $totalH / $ih) * $scaleMul
+                    # Base fit-to-virtual-bounding-box scale multiplied by user scaleMul
+                    $baseFitScale = [Math]::Max($virtTotalW / $iw, $totalH / $ih)
+                    $imgBaseScale = $baseFitScale * $scaleMul
                     $sdw = [int]($iw * $imgBaseScale * $scale)
                     $sdh = [int]($ih * $imgBaseScale * $scale)
 
@@ -3776,9 +3785,19 @@ $btnWallpapers.add_Click({
         if ($posCode -eq 5) {
             $spanImg = $txtImgPath.Text.Trim()
             if ($spanImg -and (Test-Path -LiteralPath $spanImg)) {
+                $spanAdj = if ($adjState.Contains("1")) { $adjState["1"] } else { $null }
+                $scaleP = if ($spanAdj -and $spanAdj.ScalePercent) { [double]$spanAdj.ScalePercent } else { 100.0 }
+                $offX = if ($spanAdj -and $spanAdj.OffsetX) { [int]$spanAdj.OffsetX } else { 0 }
+                $offY = if ($spanAdj -and $spanAdj.OffsetY) { [int]$spanAdj.OffsetY } else { 0 }
+                $flipH = if ($spanAdj -and $spanAdj.FlipH) { [bool]$spanAdj.FlipH } else { $false }
+                $flipV = if ($spanAdj -and $spanAdj.FlipV) { [bool]$spanAdj.FlipV } else { $false }
+                $bgHex = if ($spanAdj -and $spanAdj.BgColor) { $spanAdj.BgColor } else { "#000000" }
+
                 $hasBezelComp = ($numBezelGap.Value -gt 0 -or $chkPerEdgeGap.Checked)
-                if ($hasBezelComp -and $activeLiveMons.Count -gt 1) {
-                    # Spliced span with bezel gap compensation per monitor
+                $hasCustomTransforms = ($scaleP -ne 100.0 -or $offX -ne 0 -or $offY -ne 0 -or $flipH -or $flipV -or ($bgHex -ne "#000000" -and $bgHex -ne "#000"))
+
+                if (($hasBezelComp -or $hasCustomTransforms) -and $activeLiveMons.Count -gt 1) {
+                    # Spliced span with scale, offsets, flips, and bezel gap compensation per monitor
                     $totalGap = 0
                     $cumGaps = @()
                     for ($e = 0; $e -lt ($activeLiveMons.Count - 1); $e++) {
@@ -3799,6 +3818,38 @@ $btnWallpapers.add_Click({
                     $cacheDir = Join-Path $env:LOCALAPPDATA "DeskShift\WallpaperCache"
                     if (-not (Test-Path $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null }
 
+                    # Load and transform source image (flip, scale)
+                    $rawImg = [System.Drawing.Image]::FromFile($spanImg)
+                    $srcBmp = New-Object System.Drawing.Bitmap($rawImg)
+                    $rawImg.Dispose()
+
+                    if ($flipH -and $flipV) {
+                        $srcBmp.RotateFlip([System.Drawing.RotateFlipType]::RotateNoneFlipXY)
+                    } elseif ($flipH) {
+                        $srcBmp.RotateFlip([System.Drawing.RotateFlipType]::RotateNoneFlipX)
+                    } elseif ($flipV) {
+                        $srcBmp.RotateFlip([System.Drawing.RotateFlipType]::RotateNoneFlipY)
+                    }
+
+                    $scaleMul = [Math]::Max(0.01, $scaleP / 100.0)
+                    $baseFitScale = [Math]::Max($vTotalW / $srcBmp.Width, $vTotalH / $srcBmp.Height)
+                    $scaledW = [int]($srcBmp.Width * $baseFitScale * $scaleMul)
+                    $scaledH = [int]($srcBmp.Height * $baseFitScale * $scaleMul)
+
+                    $fullBmp = New-Object System.Drawing.Bitmap($vTotalW, $vTotalH)
+                    $fg = [System.Drawing.Graphics]::FromImage($fullBmp)
+                    $fg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                    $bgColor = try { [System.Drawing.ColorTranslator]::FromHtml($bgHex) } catch { [System.Drawing.Color]::Black }
+                    $bgBrush = New-Object System.Drawing.SolidBrush($bgColor)
+                    $fg.FillRectangle($bgBrush, 0, 0, $vTotalW, $vTotalH)
+                    $bgBrush.Dispose()
+
+                    $drawImgX = [int](($vTotalW - $scaledW) / 2) + $offX
+                    $drawImgY = [int](($vTotalH - $scaledH) / 2) + $offY
+                    $fg.DrawImage($srcBmp, $drawImgX, $drawImgY, $scaledW, $scaledH)
+                    $fg.Dispose()
+                    $srcBmp.Dispose()
+
                     for ($m = 0; $m -lt $activeLiveMons.Count; $m++) {
                         $mon = $activeLiveMons[$m]
                         $tW = $mon.Right - $mon.Left
@@ -3806,31 +3857,21 @@ $btnWallpapers.add_Click({
                         $monVirtX = ($mon.Left - $minX) + $cumGaps[$m]
                         $monVirtY = ($mon.Top - $minY)
                         $cleanProf = ($script:curProfName -replace '[^a-zA-Z0-9_\-]', '_')
-                        $renderedOut = Join-Path $cacheDir "preview_${cleanProf}_span_mon$($m+1).png"
-                        
-                        # Generate sliced span wallpaper
-                        $srcImg = [System.Drawing.Image]::FromFile($spanImg)
-                        $sScale = [Math]::Max($vTotalW / $srcImg.Width, $vTotalH / $srcImg.Height)
-                        $scaledW = [int]($srcImg.Width * $sScale)
-                        $scaledH = [int]($srcImg.Height * $sScale)
-                        $fullBmp = New-Object System.Drawing.Bitmap($vTotalW, $vTotalH)
-                        $fg = [System.Drawing.Graphics]::FromImage($fullBmp)
-                        $fg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-                        $fg.DrawImage($srcImg, [int](($vTotalW - $scaledW) / 2), [int](($vTotalH - $scaledH) / 2), $scaledW, $scaledH)
-                        $fg.Dispose()
-                        $srcImg.Dispose()
+                        $hashKey = "${scaleP}_${offX}_${offY}_${totalGap}_${m}"
+                        $hash = [Math]::Abs($hashKey.GetHashCode())
+                        $renderedOut = Join-Path $cacheDir "preview_${cleanProf}_span_mon$($m+1)_${hash}.png"
 
                         $sliceBmp = New-Object System.Drawing.Bitmap($tW, $tH)
                         $sg = [System.Drawing.Graphics]::FromImage($sliceBmp)
                         $sg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
                         $sg.DrawImage($fullBmp, (New-Object System.Drawing.Rectangle(0, 0, $tW, $tH)), (New-Object System.Drawing.Rectangle($monVirtX, $monVirtY, $tW, $tH)), [System.Drawing.GraphicsUnit]::Pixel)
                         $sg.Dispose()
-                        $fullBmp.Dispose()
                         $sliceBmp.Save($renderedOut, [System.Drawing.Imaging.ImageFormat]::Png)
                         $sliceBmp.Dispose()
 
                         [DesktopWallpaperNative]::ApplyWallpaper($mon.Path, $renderedOut, 4) | Out-Null
                     }
+                    $fullBmp.Dispose()
                 } else {
                     [DesktopWallpaperNative]::ApplyWallpaper($null, $spanImg, 5) | Out-Null
                 }
