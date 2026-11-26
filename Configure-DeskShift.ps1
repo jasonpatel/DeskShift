@@ -3520,7 +3520,23 @@ $btnWallpapers.add_Click({
             if ($m.Bottom -gt $maxY) { $maxY = $m.Bottom }
         }
 
-        $totalW = [Math]::Max(100, $maxX - $minX)
+        if ($cmbSizing.SelectedIndex -eq 5) {
+            $totalBezelGaps = 0
+            if ($mons.Count -gt 1) {
+                for ($edgeIdx = 0; $edgeIdx -lt ($mons.Count - 1); $edgeIdx++) {
+                    $eName = "Edge $($edgeIdx + 1) (M$($edgeIdx + 1) - M$($edgeIdx + 2))"
+                    $eGap = if ($chkPerEdgeGap.Checked -and $script:perEdgeGaps.Contains($eName)) {
+                        [int]$script:perEdgeGaps[$eName]
+                    } else {
+                        [int]$numBezelGap.Value
+                    }
+                    $totalBezelGaps += $eGap
+                }
+            }
+            $totalW = [Math]::Max(100, ($maxX - $minX) + $totalBezelGaps)
+        } else {
+            $totalW = [Math]::Max(100, $maxX - $minX)
+        }
         $totalH = [Math]::Max(100, $maxY - $minY)
 
         $availW = $pnlCanvas.Width - 40
@@ -3532,9 +3548,26 @@ $btnWallpapers.add_Click({
 
         $curIdx = $cmbMonitorPick.SelectedIndex
 
+        # Calculate cumulative gap per monitor for Span mode
+        $cumGaps = @()
+        $runningGap = 0
+        for ($mIdx = 0; $mIdx -lt $mons.Count; $mIdx++) {
+            $cumGaps += $runningGap
+            if ($mIdx -lt ($mons.Count - 1)) {
+                $eName = "Edge $($mIdx + 1) (M$($mIdx + 1) - M$($mIdx + 2))"
+                $eGap = if ($chkPerEdgeGap.Checked -and $script:perEdgeGaps.Contains($eName)) {
+                    [int]$script:perEdgeGaps[$eName]
+                } else {
+                    [int]$numBezelGap.Value
+                }
+                $runningGap += $eGap
+            }
+        }
+
         for ($i = 0; $i -lt $mons.Count; $i++) {
             $mon = $mons[$i]
-            $rx = $drawOffsetX + [int](($mon.Left - $minX) * $scale)
+            $monLeft = ($mon.Left - $minX) + (if ($cmbSizing.SelectedIndex -eq 5) { $cumGaps[$i] } else { 0 })
+            $rx = $drawOffsetX + [int]($monLeft * $scale)
             $ry = $drawOffsetY + [int](($mon.Top - $minY) * $scale)
             $rw = [Math]::Max(10, [int](($mon.Right - $mon.Left) * $scale))
             $rh = [Math]::Max(10, [int](($mon.Bottom - $mon.Top) * $scale))
@@ -3593,8 +3626,8 @@ $btnWallpapers.add_Click({
                 $spanAdj = if ($adjState.Contains("1")) { $adjState["1"] } else { $null }
                 $activeAdj = if ($cmbSizing.SelectedIndex -eq 5) { $spanAdj } else { $adj }
 
-                $offX = if ($activeAdj) { [int]($activeAdj.OffsetX * $pxScaleX) } else { 0 }
-                $offY = if ($activeAdj) { [int]($activeAdj.OffsetY * $pxScaleY) } else { 0 }
+                $offX = if ($activeAdj) { [int]($activeAdj.OffsetX * $scale) } else { 0 }
+                $offY = if ($activeAdj) { [int]($activeAdj.OffsetY * $scale) } else { 0 }
                 $scaleMul = if ($activeAdj -and $activeAdj.ScalePercent) { [Math]::Max(0.01, [double]$activeAdj.ScalePercent / 100.0) } else { 1.0 }
 
                 $sizing = if ($cmbSizing.SelectedItem) { $cmbSizing.SelectedItem.ToString() } else { "Fill" }
@@ -3603,47 +3636,18 @@ $btnWallpapers.add_Click({
 
                 if ($cmbSizing.SelectedIndex -eq 5) {
                     # Span mode with Bezel / Gap offset compensation and Scale percentage
-                    # Calculate cumulative horizontal gap up to monitor i
-                    $cumGap = 0
-                    $totalBezelGaps = 0
-                    if ($mons.Count -gt 1) {
-                        for ($edgeIdx = 0; $edgeIdx -lt ($mons.Count - 1); $edgeIdx++) {
-                            $eName = "Edge $($edgeIdx + 1) (M$($edgeIdx + 1) - M$($edgeIdx + 2))"
-                            $eGap = if ($chkPerEdgeGap.Checked -and $script:perEdgeGaps.Contains($eName)) {
-                                [int]$script:perEdgeGaps[$eName]
-                            } else {
-                                [int]$numBezelGap.Value
-                            }
-                            $totalBezelGaps += $eGap
-                            if ($edgeIdx -lt $i) {
-                                $cumGap += $eGap
-                            }
-                        }
-                    }
-
-                    $virtTotalW = $totalW + $totalBezelGaps
-                    # Base fit-to-virtual-bounding-box scale multiplied by user scaleMul
+                    $virtTotalW = $totalW # already includes totalBezelGaps
                     $baseFitScale = [Math]::Max($virtTotalW / $iw, $totalH / $ih)
                     $imgBaseScale = $baseFitScale * $scaleMul
                     $sdw = [int]($iw * $imgBaseScale * $scale)
                     $sdh = [int]($ih * $imgBaseScale * $scale)
-
-                    # Virtual coordinate of this monitor including preceding gaps
-                    $virtMonLeft = ($mon.Left - $minX) + $cumGap
-                    $virtMonTop = ($mon.Top - $minY)
-                    $monScreenRx = $drawOffsetX + [int]($virtMonLeft * $scale)
-                    $monScreenRy = $drawOffsetY + [int]($virtMonTop * $scale)
 
                     $virtCanvasW = [int]($virtTotalW * $scale)
                     $virtCanvasH = [int]($totalH * $scale)
                     $baseImgX = $drawOffsetX + [int](($virtCanvasW - $sdw) / 2) + $offX
                     $baseImgY = $drawOffsetY + [int](($virtCanvasH - $sdh) / 2) + $offY
 
-                    # Shift drawn image for monitor i so the physical monitor cutout aligns perfectly
-                    $drawX = $baseImgX - [int]($cumGap * $scale)
-                    $drawY = $baseImgY
-
-                    $g.DrawImage($imgToDraw, $drawX, $drawY, $sdw, $sdh)
+                    $g.DrawImage($imgToDraw, $baseImgX, $baseImgY, $sdw, $sdh)
                 } elseif ($sizing -like "*Fit Best*") {
                     $imgScale = [Math]::Min($rw / $iw, $rh / $ih) * $scaleMul
                     $dw = [int]($iw * $imgScale)
