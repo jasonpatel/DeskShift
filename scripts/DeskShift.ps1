@@ -277,6 +277,104 @@ function Sync-ProfileLaunchApp {
     }
 }
 
+# Helper to generate custom transformed wallpaper file (with offset, flip, bg color)
+function New-TransformedWallpaper {
+    param(
+        [string]$SourcePath,
+        [int]$TargetWidth,
+        [int]$TargetHeight,
+        [string]$SizingMode,
+        [int]$OffsetX = 0,
+        [int]$OffsetY = 0,
+        [bool]$FlipH = $false,
+        [bool]$FlipV = $false,
+        [string]$BgColorHex = "#000000",
+        [string]$OutputPath
+    )
+
+    if (-not (Test-Path -LiteralPath $SourcePath)) { return $null }
+
+    Add-Type -AssemblyName System.Drawing
+    try {
+        $srcImg = [System.Drawing.Image]::FromFile($SourcePath)
+        $bmp = New-Object System.Drawing.Bitmap($srcImg)
+        $srcImg.Dispose()
+
+        if ($FlipH -and $FlipV) {
+            $bmp.RotateFlip([System.Drawing.RotateFlipType]::RotateNoneFlipXY)
+        } elseif ($FlipH) {
+            $bmp.RotateFlip([System.Drawing.RotateFlipType]::RotateNoneFlipX)
+        } elseif ($FlipV) {
+            $bmp.RotateFlip([System.Drawing.RotateFlipType]::RotateNoneFlipY)
+        }
+
+        $destBmp = New-Object System.Drawing.Bitmap($TargetWidth, $TargetHeight, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $g = [System.Drawing.Graphics]::FromImage($destBmp)
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $g.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+
+        $bgColor = try { [System.Drawing.ColorTranslator]::FromHtml($BgColorHex) } catch { [System.Drawing.Color]::Black }
+        $brush = New-Object System.Drawing.SolidBrush($bgColor)
+        $g.FillRectangle($brush, 0, 0, $TargetWidth, $TargetHeight)
+        $brush.Dispose()
+
+        $srcW = $bmp.Width
+        $srcH = $bmp.Height
+
+        switch ($SizingMode) {
+            "Stretch" {
+                $destRect = New-Object System.Drawing.Rectangle($OffsetX, $OffsetY, $TargetWidth, $TargetHeight)
+                $g.DrawImage($bmp, $destRect)
+            }
+            "Center" {
+                $x = [int](($TargetWidth - $srcW) / 2) + $OffsetX
+                $y = [int](($TargetHeight - $srcH) / 2) + $OffsetY
+                $destRect = New-Object System.Drawing.Rectangle($x, $y, $srcW, $srcH)
+                $g.DrawImage($bmp, $destRect)
+            }
+            "Tile" {
+                $tb = New-Object System.Drawing.TextureBrush($bmp)
+                $tb.TranslateTransform($OffsetX, $OffsetY)
+                $g.FillRectangle($tb, 0, 0, $TargetWidth, $TargetHeight)
+                $tb.Dispose()
+            }
+            "Fit" {
+                $scale = [Math]::Min($TargetWidth / $srcW, $TargetHeight / $srcH)
+                $drawW = [int]($srcW * $scale)
+                $drawH = [int]($srcH * $scale)
+                $x = [int](($TargetWidth - $drawW) / 2) + $OffsetX
+                $y = [int](($TargetHeight - $drawH) / 2) + $OffsetY
+                $destRect = New-Object System.Drawing.Rectangle($x, $y, $drawW, $drawH)
+                $g.DrawImage($bmp, $destRect)
+            }
+            default { # "Fill"
+                $scale = [Math]::Max($TargetWidth / $srcW, $TargetHeight / $srcH)
+                $drawW = [int]($srcW * $scale)
+                $drawH = [int]($srcH * $scale)
+                $x = [int](($TargetWidth - $drawW) / 2) + $OffsetX
+                $y = [int](($TargetHeight - $drawH) / 2) + $OffsetY
+                $destRect = New-Object System.Drawing.Rectangle($x, $y, $drawW, $drawH)
+                $g.DrawImage($bmp, $destRect)
+            }
+        }
+
+        $g.Dispose()
+        $bmp.Dispose()
+
+        $parentDir = Split-Path $OutputPath -Parent
+        if (-not (Test-Path -LiteralPath $parentDir)) { New-Item -ItemType Directory -Path $parentDir -Force | Out-Null }
+
+        $destBmp.Save($OutputPath, [System.Drawing.Imaging.ImageFormat]::Png)
+        $destBmp.Dispose()
+        return $OutputPath
+    } catch {
+        Write-Warning "Failed to render transformed wallpaper: $_"
+        return $null
+    }
+}
+
 # Function to apply per-profile desktop wallpapers with multi-monitor positioning
 function Sync-ProfileWallpapers {
     param($ProfileItem)
@@ -308,14 +406,17 @@ function Sync-ProfileWallpapers {
             return
         }
 
-        # Mode B: Per-monitor or Single image
+        # Cache folder for transformed profile wallpapers
+        $cacheDir = Join-Path $env:LOCALAPPDATA "DeskShift\WallpaperCache"
+
+        # Mode B: Per-monitor images
         if ($wCfg.Monitors) {
             foreach ($prop in $wCfg.Monitors.PSObject.Properties) {
                 $monIdxStr = $prop.Name
                 $imgFile = $prop.Value
                 if ($imgFile -and (Test-Path -LiteralPath $imgFile)) {
                     $idx = [int]$monIdxStr
-                    # Find matching monitor by 0-based index or 1-based index
+                    # Find matching monitor by 0-based or 1-based index
                     $targetMon = $null
                     if ($idx -lt $activeMons.Count) {
                         $targetMon = $activeMons[$idx]
@@ -324,6 +425,34 @@ function Sync-ProfileWallpapers {
                     }
 
                     if ($targetMon) {
+                        # Check if adjustments are defined for this monitor
+                        $adj = $null
+                        if ($wCfg.Adjustments -and $wCfg.Adjustments.PSObject.Properties[$monIdxStr]) {
+                            $adj = $wCfg.Adjustments.$monIdxStr
+                        }
+
+                        $targetW = [Math]::Max(100, $targetMon.Right - $targetMon.Left)
+                        $targetH = [Math]::Max(100, $targetMon.Bottom - $targetMon.Top)
+
+                        $hasTransformation = ($adj -and (
+                            ($adj.OffsetX -and [int]$adj.OffsetX -ne 0) -or
+                            ($adj.OffsetY -and [int]$adj.OffsetY -ne 0) -or
+                            ($adj.FlipH -and [bool]$adj.FlipH) -or
+                            ($adj.FlipV -and [bool]$adj.FlipV) -or
+                            ($adj.BgColor -and $adj.BgColor -ne "#000000")
+                        ))
+
+                        if ($hasTransformation) {
+                            $cleanProf = ($ProfileItem.Name -replace '[^a-zA-Z0-9_\-]', '_')
+                            $renderedOut = Join-Path $cacheDir "${cleanProf}_mon${monIdxStr}.png"
+                            $appliedImg = New-TransformedWallpaper -SourcePath $imgFile -TargetWidth $targetW -TargetHeight $targetH -SizingMode $wCfg.Position -OffsetX ([int]$adj.OffsetX) -OffsetY ([int]$adj.OffsetY) -FlipH ([bool]$adj.FlipH) -FlipV ([bool]$adj.FlipV) -BgColorHex $adj.BgColor -OutputPath $renderedOut
+                            if ($appliedImg) {
+                                [DesktopWallpaperNative]::ApplyWallpaper($targetMon.Path, $appliedImg, 4) | Out-Null
+                                continue
+                            }
+                        }
+
+                        # Normal native apply
                         [DesktopWallpaperNative]::ApplyWallpaper($targetMon.Path, $imgFile, $posCode) | Out-Null
                     }
                 }
